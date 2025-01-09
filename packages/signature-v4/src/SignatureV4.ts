@@ -1,4 +1,3 @@
-import { HeaderMarshaller } from "@smithy/eventstream-codec";
 import {
   AwsCredentialIdentity,
   ChecksumConstructor,
@@ -22,7 +21,8 @@ import {
 } from "@smithy/types";
 import { toHex } from "@smithy/util-hex-encoding";
 import { normalizeProvider } from "@smithy/util-middleware";
-import { fromUtf8, toUint8Array, toUtf8 } from "@smithy/util-utf8";
+import { escapeUri } from "@smithy/util-uri-escape";
+import { toUint8Array } from "@smithy/util-utf8";
 
 import {
   ALGORITHM_IDENTIFIER,
@@ -44,11 +44,15 @@ import { createScope, getSigningKey } from "./credentialDerivation";
 import { getCanonicalHeaders } from "./getCanonicalHeaders";
 import { getCanonicalQuery } from "./getCanonicalQuery";
 import { getPayloadHash } from "./getPayloadHash";
+import { HeaderFormatter } from "./HeaderFormatter";
 import { hasHeader } from "./headerUtil";
 import { moveHeadersToQuery } from "./moveHeadersToQuery";
 import { prepareRequest } from "./prepareRequest";
 import { iso8601 } from "./utilDate";
 
+/**
+ * @public
+ */
 export interface SignatureV4Init {
   /**
    * The service signing name.
@@ -71,7 +75,7 @@ export interface SignatureV4Init {
    * A constructor function for a hash object that will calculate SHA-256 HMAC
    * checksums.
    */
-  sha256?: ChecksumConstructor | HashConstructor;
+  sha256: ChecksumConstructor | HashConstructor;
 
   /**
    * Whether to uri-escape the request URI path as part of computing the
@@ -93,10 +97,16 @@ export interface SignatureV4Init {
   applyChecksum?: boolean;
 }
 
+/**
+ * @public
+ */
 export interface SignatureV4CryptoInit {
   sha256: ChecksumConstructor | HashConstructor;
 }
 
+/**
+ * @public
+ */
 export class SignatureV4 implements RequestPresigner, RequestSigner, StringSigner, EventSigner, MessageSigner {
   private readonly service: string;
   private readonly regionProvider: Provider<string>;
@@ -104,7 +114,7 @@ export class SignatureV4 implements RequestPresigner, RequestSigner, StringSigne
   private readonly sha256: ChecksumConstructor | HashConstructor;
   private readonly uriEscapePath: boolean;
   private readonly applyChecksum: boolean;
-  private readonly headerMarshaller = new HeaderMarshaller(toUtf8, fromUtf8);
+  private readonly headerFormatter = new HeaderFormatter();
 
   constructor({
     applyChecksum,
@@ -130,6 +140,7 @@ export class SignatureV4 implements RequestPresigner, RequestSigner, StringSigne
       unsignableHeaders,
       unhoistableHeaders,
       signableHeaders,
+      hoistableHeaders,
       signingRegion,
       signingService,
     } = options;
@@ -145,7 +156,7 @@ export class SignatureV4 implements RequestPresigner, RequestSigner, StringSigne
     }
 
     const scope = createScope(shortDate, region, signingService ?? this.service);
-    const request = moveHeadersToQuery(prepareRequest(originalRequest), { unhoistableHeaders });
+    const request = moveHeadersToQuery(prepareRequest(originalRequest), { unhoistableHeaders, hoistableHeaders });
 
     if (credentials.sessionToken) {
       request.query[TOKEN_QUERY_PARAM] = credentials.sessionToken;
@@ -212,7 +223,7 @@ export class SignatureV4 implements RequestPresigner, RequestSigner, StringSigne
   ): Promise<SignedMessage> {
     const promise = this.signEvent(
       {
-        headers: this.headerMarshaller.format(signableMessage.message.headers),
+        headers: this.headerFormatter.format(signableMessage.message.headers),
         payload: signableMessage.message.body,
       },
       {
@@ -331,7 +342,8 @@ ${toHex(hashedRequest)}`;
         normalizedPathSegments.length > 0 && path?.endsWith("/") ? "/" : ""
       }`;
 
-      const doubleEncoded = encodeURIComponent(normalizedPath);
+      // Double encode and replace non-standard characters !'()* according to RFC 3986
+      const doubleEncoded = escapeUri(normalizedPath);
       return doubleEncoded.replace(/%2F/g, "/");
     }
 

@@ -106,6 +106,9 @@ final class StructuredMemberWriter {
             String optionalSuffix = shape.isUnionShape() || !isRequiredMember(member) ? "?" : "";
             String typeSuffix = requiredMemberMode == RequiredMemberMode.NULLABLE
                     && isRequiredMember(member) ? " | undefined" : "";
+            if (optionalSuffix.equals("?")) {
+                typeSuffix = " | undefined"; // support exactOptionalPropertyTypes.
+            }
             writer.write("${L}${L}${L}: ${T}${L};", memberPrefix, memberName, optionalSuffix,
                     symbolProvider.toSymbol(member), typeSuffix);
 
@@ -544,7 +547,7 @@ final class StructuredMemberWriter {
                             }
                             writer.write("], [");
                             for (MemberShape member : shape.asEnumShape().get().getAllMembers().values()) {
-                                if (!member.hasTrait((InternalTrait.class)) && !member.hasTag("internal")) {
+                                if (!member.hasTrait((InternalTrait.class))) {
                                     writer.write("$S,", member.expectTrait(EnumValueTrait.class).expectStringValue());
                                 }
                             }
@@ -611,7 +614,20 @@ final class StructuredMemberWriter {
             Shape collectionMemberTargetShape = model.expectShape(collectionMemberShape.getTarget());
             writer.writeInline("Iterable<$T>", getSymbolForValidatedType(collectionMemberTargetShape));
         } else if (shape.isMapShape()) {
-            writer.writeInline("Record<string, $T>", getSymbolForValidatedType(((MapShape) shape).getValue()));
+            MapShape mapShape = shape.asMapShape().get();
+            String keyType = getSymbolForValidatedType(mapShape.getKey()).toString();
+
+            if (keyType.equals("string")) {
+                writer.writeInline("Record<$T, $T>",
+                    getSymbolForValidatedType(mapShape.getKey()),
+                    getSymbolForValidatedType(mapShape.getValue())
+                );
+            } else {
+                writer.writeInline("Partial<Record<$T, $T>>",
+                    getSymbolForValidatedType(mapShape.getKey()),
+                    getSymbolForValidatedType(mapShape.getValue())
+                );
+            }
         } else if (shape instanceof SimpleShape) {
             writer.writeInline("$T", getSymbolForValidatedType(shape));
         } else {
@@ -664,6 +680,9 @@ final class StructuredMemberWriter {
         if (shape.isBlobShape() && shape.hasTrait(StreamingTrait.class)) {
             return symbolProvider.toSymbol(shape)
                     .toBuilder()
+                    .addReference(Symbol.builder()
+                        .name("Readable").namespace("stream", "/")
+                        .build())
                     .name("Readable | ReadableStream | Blob | string | Uint8Array | Buffer")
                     .build();
         }

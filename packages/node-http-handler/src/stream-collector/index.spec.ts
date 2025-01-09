@@ -1,3 +1,5 @@
+import { describe, expect, test as it } from "vitest";
+
 import { streamCollector } from "./index";
 import { ReadFromBuffers } from "./readable.mock";
 
@@ -10,6 +12,20 @@ describe("streamCollector", () => {
     const expected = new Uint8Array([102, 111, 111, 98, 97, 114, 98, 117, 122, 122]);
     const collectedData = await streamCollector(mockReadStream);
     expect(collectedData).toEqual(expected);
+  });
+
+  it("accepts ReadableStream if the global web stream implementation exists in Node.js", async () => {
+    if (typeof ReadableStream === "function") {
+      const data = await streamCollector(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(Buffer.from("abcd"));
+            controller.close();
+          },
+        })
+      );
+      expect(Buffer.from(data)).toEqual(Buffer.from("abcd"));
+    }
   });
 
   it("will propagate errors from the stream", async () => {

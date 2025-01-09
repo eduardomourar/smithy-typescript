@@ -1,7 +1,9 @@
+import { afterEach, beforeEach, describe, expect, test as it, vi } from "vitest";
+
 describe.skip("emitWarningIfUnsupportedVersion", () => {
   let emitWarningIfUnsupportedVersion;
   const emitWarning = process.emitWarning;
-  const supportedVersion = "14.0.0";
+  const supportedVersion = "16.0.0";
 
   beforeEach(() => {
     const module = require("./emitWarningIfUnsupportedVersion");
@@ -9,8 +11,8 @@ describe.skip("emitWarningIfUnsupportedVersion", () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.resetModules();
+    vi.clearAllMocks();
+    vi.resetModules();
     process.emitWarning = emitWarning;
   });
 
@@ -31,19 +33,12 @@ describe.skip("emitWarningIfUnsupportedVersion", () => {
         [getPreviousMajorVersion(major), 0, 0],
       ].map((arr) => `v${arr.join(".")}`)
     )(`%s`, async (unsupportedVersion) => {
-      process.emitWarning = jest.fn();
+      process.emitWarning = vi.fn();
       emitWarningIfUnsupportedVersion(unsupportedVersion);
 
       // Verify that the warning was emitted.
       expect(process.emitWarning).toHaveBeenCalledTimes(1);
-      expect(process.emitWarning).toHaveBeenCalledWith(
-        `The AWS SDK for JavaScript (v3) will\n` +
-          `no longer support Node.js ${unsupportedVersion} on November 1, 2022.\n\n` +
-          `To continue receiving updates to AWS services, bug fixes, and security\n` +
-          `updates please upgrade to Node.js 14.x or later.\n\n` +
-          `For details, please refer our blog post: https://a.co/48dbdYz`,
-        `NodeDeprecationWarning`
-      );
+      expect(process.emitWarning).toHaveBeenCalledWith(`<<TEXT>>`, `NodeDeprecationWarning`);
 
       // Verify that the warning emits only once.
       emitWarningIfUnsupportedVersion(unsupportedVersion);
@@ -61,7 +56,7 @@ describe.skip("emitWarningIfUnsupportedVersion", () => {
         [major + 1, 0, 0],
       ].map((arr) => `v${arr.join(".")}`)
     )(`%s`, async (unsupportedVersion) => {
-      process.emitWarning = jest.fn();
+      process.emitWarning = vi.fn();
       emitWarningIfUnsupportedVersion(unsupportedVersion);
       expect(process.emitWarning).not.toHaveBeenCalled();
     });

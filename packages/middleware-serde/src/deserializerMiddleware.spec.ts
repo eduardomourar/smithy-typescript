@@ -1,8 +1,11 @@
+import { EndpointBearer, SerdeFunctions } from "@smithy/types";
+import { afterEach, beforeEach, describe, expect, test as it, vi } from "vitest";
+
 import { deserializerMiddleware } from "./deserializerMiddleware";
 
 describe("deserializerMiddleware", () => {
-  const mockNext = jest.fn();
-  const mockDeserializer = jest.fn();
+  const mockNext = vi.fn();
+  const mockDeserializer = vi.fn();
 
   const mockOptions = {
     endpoint: () =>
@@ -11,7 +14,7 @@ describe("deserializerMiddleware", () => {
         hostname: "hostname",
         path: "path",
       }),
-  };
+  } as EndpointBearer & SerdeFunctions;
 
   const mockArgs = {
     input: {
@@ -49,7 +52,7 @@ describe("deserializerMiddleware", () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("calls deserializer and populates response object", async () => {
@@ -78,7 +81,12 @@ describe("deserializerMiddleware", () => {
   });
 
   it("adds a hint about $response to the message of the thrown error", async () => {
-    const exception = Object.assign(new Error("MockException"), mockNextResponse.response);
+    const exception = Object.assign(new Error("MockException"), mockNextResponse.response, {
+      $response: {
+        body: "",
+      },
+      $responseBodyText: "oh no",
+    });
     mockDeserializer.mockReset();
     mockDeserializer.mockRejectedValueOnce(exception);
     try {
@@ -88,6 +96,7 @@ describe("deserializerMiddleware", () => {
       expect(e.message).toContain(
         "to see the raw response, inspect the hidden field {error}.$response on this object."
       );
+      expect(e.$response.body).toEqual("oh no");
     }
   });
 });

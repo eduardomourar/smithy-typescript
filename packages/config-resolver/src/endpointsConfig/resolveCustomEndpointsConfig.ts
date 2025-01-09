@@ -4,7 +4,7 @@ import { normalizeProvider } from "@smithy/util-middleware";
 import { EndpointsInputConfig, EndpointsResolvedConfig } from "./resolveEndpointsConfig";
 
 /**
- * @internal
+ * @public
  */
 export interface CustomEndpointsInputConfig extends EndpointsInputConfig {
   /**
@@ -13,6 +13,9 @@ export interface CustomEndpointsInputConfig extends EndpointsInputConfig {
   endpoint: string | Endpoint | Provider<Endpoint>;
 }
 
+/**
+ * @internal
+ */
 interface PreviouslyResolved {
   urlParser: UrlParser;
 }

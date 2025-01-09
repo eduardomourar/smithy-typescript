@@ -21,6 +21,8 @@ import { asSdkError } from "./util";
 
 /**
  * Strategy options to be passed to StandardRetryStrategy
+ * @public
+ * @deprecated use StandardRetryStrategy from @smithy/util-retry
  */
 export interface StandardRetryStrategyOptions {
   retryDecider?: RetryDecider;
@@ -29,6 +31,7 @@ export interface StandardRetryStrategyOptions {
 }
 
 /**
+ * @public
  * @deprecated use StandardRetryStrategy from @smithy/util-retry
  */
 export class StandardRetryStrategy implements RetryStrategy {
@@ -37,7 +40,10 @@ export class StandardRetryStrategy implements RetryStrategy {
   private retryQuota: RetryQuota;
   public mode: string = RETRY_MODES.STANDARD;
 
-  constructor(private readonly maxAttemptsProvider: Provider<number>, options?: StandardRetryStrategyOptions) {
+  constructor(
+    private readonly maxAttemptsProvider: Provider<number>,
+    options?: StandardRetryStrategyOptions
+  ) {
     this.retryDecider = options?.retryDecider ?? defaultRetryDecider;
     this.delayDecider = options?.delayDecider ?? defaultDelayDecider;
     this.retryQuota = options?.retryQuota ?? getDefaultRetryQuota(INITIAL_RETRY_TOKENS);

@@ -9,14 +9,36 @@ import {
   Pluggable,
   Priority,
   RelativeLocation,
+  RelativeMiddlewareOptions,
   Step,
 } from "@smithy/types";
 
 import { AbsoluteMiddlewareEntry, MiddlewareEntry, Normalized, RelativeMiddlewareEntry } from "./types";
 
+const getAllAliases = (name: string | undefined, aliases: Array<string> | undefined) => {
+  const _aliases = [];
+  if (name) {
+    _aliases.push(name);
+  }
+  if (aliases) {
+    for (const alias of aliases) {
+      _aliases.push(alias);
+    }
+  }
+  return _aliases;
+};
+
+const getMiddlewareNameWithAliases = (name: string | undefined, aliases: Array<string> | undefined): string => {
+  return `${name || "anonymous"}${aliases && aliases.length > 0 ? ` (a.k.a. ${aliases.join(",")})` : ""}`;
+};
+
+/**
+ * @internal
+ */
 export const constructStack = <Input extends object, Output extends object>(): MiddlewareStack<Input, Output> => {
   let absoluteEntries: AbsoluteMiddlewareEntry<Input, Output>[] = [];
   let relativeEntries: RelativeMiddlewareEntry<Input, Output>[] = [];
+  let identifyOnResolve = false;
   const entriesNameSet: Set<string> = new Set();
 
   const sort = <T extends AbsoluteMiddlewareEntry<Input, Output>>(entries: T[]): T[] =>
@@ -29,9 +51,12 @@ export const constructStack = <Input extends object, Output extends object>(): M
   const removeByName = (toRemove: string): boolean => {
     let isRemoved = false;
     const filterCb = (entry: MiddlewareEntry<Input, Output>): boolean => {
-      if (entry.name && entry.name === toRemove) {
+      const aliases = getAllAliases(entry.name, entry.aliases);
+      if (aliases.includes(toRemove)) {
         isRemoved = true;
-        entriesNameSet.delete(toRemove);
+        for (const alias of aliases) {
+          entriesNameSet.delete(alias);
+        }
         return false;
       }
       return true;
@@ -46,7 +71,9 @@ export const constructStack = <Input extends object, Output extends object>(): M
     const filterCb = (entry: MiddlewareEntry<Input, Output>): boolean => {
       if (entry.middleware === toRemove) {
         isRemoved = true;
-        if (entry.name) entriesNameSet.delete(entry.name);
+        for (const alias of getAllAliases(entry.name, entry.aliases)) {
+          entriesNameSet.delete(alias);
+        }
         return false;
       }
       return true;
@@ -67,6 +94,7 @@ export const constructStack = <Input extends object, Output extends object>(): M
       //@ts-ignore
       toStack.addRelativeTo(entry.middleware, { ...entry });
     });
+    toStack.identifyOnResolve?.(stack.identifyOnResolve());
     return toStack;
   };
 
@@ -107,7 +135,9 @@ export const constructStack = <Input extends object, Output extends object>(): M
         before: [],
         after: [],
       };
-      if (normalizedEntry.name) normalizedEntriesNameMap[normalizedEntry.name] = normalizedEntry;
+      for (const alias of getAllAliases(normalizedEntry.name, normalizedEntry.aliases)) {
+        normalizedEntriesNameMap[alias] = normalizedEntry;
+      }
       normalizedAbsoluteEntries.push(normalizedEntry);
     });
 
@@ -117,7 +147,9 @@ export const constructStack = <Input extends object, Output extends object>(): M
         before: [],
         after: [],
       };
-      if (normalizedEntry.name) normalizedEntriesNameMap[normalizedEntry.name] = normalizedEntry;
+      for (const alias of getAllAliases(normalizedEntry.name, normalizedEntry.aliases)) {
+        normalizedEntriesNameMap[alias] = normalizedEntry;
+      }
       normalizedRelativeEntries.push(normalizedEntry);
     });
 
@@ -129,9 +161,9 @@ export const constructStack = <Input extends object, Output extends object>(): M
             return;
           }
           throw new Error(
-            `${entry.toMiddleware} is not found when adding ${entry.name || "anonymous"} middleware ${entry.relation} ${
-              entry.toMiddleware
-            }`
+            `${entry.toMiddleware} is not found when adding ` +
+              `${getMiddlewareNameWithAliases(entry.name, entry.aliases)} ` +
+              `middleware ${entry.relation} ${entry.toMiddleware}`
           );
         }
         if (entry.relation === "after") {
@@ -145,61 +177,88 @@ export const constructStack = <Input extends object, Output extends object>(): M
 
     const mainChain = sort(normalizedAbsoluteEntries)
       .map(expandRelativeMiddlewareList)
-      .reduce((wholeList, expandedMiddlewareList) => {
-        // TODO: Replace it with Array.flat();
-        wholeList.push(...expandedMiddlewareList);
-        return wholeList;
-      }, [] as MiddlewareEntry<Input, Output>[]);
+      .reduce(
+        (wholeList, expandedMiddlewareList) => {
+          // TODO: Replace it with Array.flat();
+          wholeList.push(...expandedMiddlewareList);
+          return wholeList;
+        },
+        [] as MiddlewareEntry<Input, Output>[]
+      );
     return mainChain;
   };
 
   const stack: MiddlewareStack<Input, Output> = {
     add: (middleware: MiddlewareType<Input, Output>, options: HandlerOptions & AbsoluteLocation = {}) => {
-      const { name, override } = options;
+      const { name, override, aliases: _aliases } = options;
       const entry: AbsoluteMiddlewareEntry<Input, Output> = {
         step: "initialize",
         priority: "normal",
         middleware,
         ...options,
       };
-      if (name) {
-        if (entriesNameSet.has(name)) {
-          if (!override) throw new Error(`Duplicate middleware name '${name}'`);
-          const toOverrideIndex = absoluteEntries.findIndex((entry) => entry.name === name);
-          const toOverride = absoluteEntries[toOverrideIndex];
-          if (toOverride.step !== entry.step || toOverride.priority !== entry.priority) {
-            throw new Error(
-              `"${name}" middleware with ${toOverride.priority} priority in ${toOverride.step} step cannot be ` +
-                `overridden by same-name middleware with ${entry.priority} priority in ${entry.step} step.`
+      const aliases = getAllAliases(name, _aliases);
+      if (aliases.length > 0) {
+        if (aliases.some((alias) => entriesNameSet.has(alias))) {
+          if (!override) throw new Error(`Duplicate middleware name '${getMiddlewareNameWithAliases(name, _aliases)}'`);
+          for (const alias of aliases) {
+            const toOverrideIndex = absoluteEntries.findIndex(
+              (entry) => entry.name === alias || entry.aliases?.some((a) => a === alias)
             );
+            if (toOverrideIndex === -1) {
+              continue;
+            }
+            const toOverride = absoluteEntries[toOverrideIndex];
+            if (toOverride.step !== entry.step || entry.priority !== toOverride.priority) {
+              throw new Error(
+                `"${getMiddlewareNameWithAliases(toOverride.name, toOverride.aliases)}" middleware with ` +
+                  `${toOverride.priority} priority in ${toOverride.step} step cannot ` +
+                  `be overridden by "${getMiddlewareNameWithAliases(name, _aliases)}" middleware with ` +
+                  `${entry.priority} priority in ${entry.step} step.`
+              );
+            }
+            absoluteEntries.splice(toOverrideIndex, 1);
           }
-          absoluteEntries.splice(toOverrideIndex, 1);
         }
-        entriesNameSet.add(name);
+        for (const alias of aliases) {
+          entriesNameSet.add(alias);
+        }
       }
       absoluteEntries.push(entry);
     },
 
     addRelativeTo: (middleware: MiddlewareType<Input, Output>, options: HandlerOptions & RelativeLocation) => {
-      const { name, override } = options;
+      const { name, override, aliases: _aliases } = options;
       const entry: RelativeMiddlewareEntry<Input, Output> = {
         middleware,
         ...options,
       };
-      if (name) {
-        if (entriesNameSet.has(name)) {
-          if (!override) throw new Error(`Duplicate middleware name '${name}'`);
-          const toOverrideIndex = relativeEntries.findIndex((entry) => entry.name === name);
-          const toOverride = relativeEntries[toOverrideIndex];
-          if (toOverride.toMiddleware !== entry.toMiddleware || toOverride.relation !== entry.relation) {
-            throw new Error(
-              `"${name}" middleware ${toOverride.relation} "${toOverride.toMiddleware}" middleware cannot be overridden ` +
-                `by same-name middleware ${entry.relation} "${entry.toMiddleware}" middleware.`
+      const aliases = getAllAliases(name, _aliases);
+      if (aliases.length > 0) {
+        if (aliases.some((alias) => entriesNameSet.has(alias))) {
+          if (!override) throw new Error(`Duplicate middleware name '${getMiddlewareNameWithAliases(name, _aliases)}'`);
+          for (const alias of aliases) {
+            const toOverrideIndex = relativeEntries.findIndex(
+              (entry) => entry.name === alias || entry.aliases?.some((a) => a === alias)
             );
+            if (toOverrideIndex === -1) {
+              continue;
+            }
+            const toOverride = relativeEntries[toOverrideIndex];
+            if (toOverride.toMiddleware !== entry.toMiddleware || toOverride.relation !== entry.relation) {
+              throw new Error(
+                `"${getMiddlewareNameWithAliases(toOverride.name, toOverride.aliases)}" middleware ` +
+                  `${toOverride.relation} "${toOverride.toMiddleware}" middleware cannot be overridden ` +
+                  `by "${getMiddlewareNameWithAliases(name, _aliases)}" middleware ${entry.relation} ` +
+                  `"${entry.toMiddleware}" middleware.`
+              );
+            }
+            relativeEntries.splice(toOverrideIndex, 1);
           }
-          relativeEntries.splice(toOverrideIndex, 1);
         }
-        entriesNameSet.add(name);
+        for (const alias of aliases) {
+          entriesNameSet.add(alias);
+        }
       }
       relativeEntries.push(entry);
     },
@@ -218,9 +277,12 @@ export const constructStack = <Input extends object, Output extends object>(): M
     removeByTag: (toRemove: string): boolean => {
       let isRemoved = false;
       const filterCb = (entry: MiddlewareEntry<Input, Output>): boolean => {
-        const { tags, name } = entry;
+        const { tags, name, aliases: _aliases } = entry;
         if (tags && tags.includes(toRemove)) {
-          if (name) entriesNameSet.delete(name);
+          const aliases = getAllAliases(name, _aliases);
+          for (const alias of aliases) {
+            entriesNameSet.delete(alias);
+          }
           isRemoved = true;
           return false;
         }
@@ -236,6 +298,9 @@ export const constructStack = <Input extends object, Output extends object>(): M
     ): MiddlewareStack<InputType, OutputType> => {
       const cloned = cloneTo(constructStack<InputType, OutputType>());
       cloned.use(from);
+      cloned.identifyOnResolve(
+        identifyOnResolve || cloned.identifyOnResolve() || (from.identifyOnResolve?.() ?? false)
+      );
       return cloned;
     },
 
@@ -243,8 +308,18 @@ export const constructStack = <Input extends object, Output extends object>(): M
 
     identify: (): string[] => {
       return getMiddlewareList(true).map((mw: MiddlewareEntry<Input, Output>) => {
-        return mw.name + ": " + (mw.tags || []).join(",");
+        const step =
+          mw.step ??
+          (mw as unknown as RelativeMiddlewareOptions).relation +
+            " " +
+            (mw as unknown as RelativeMiddlewareOptions).toMiddleware;
+        return getMiddlewareNameWithAliases(mw.name, mw.aliases) + " - " + step;
       });
+    },
+
+    identifyOnResolve(toggle?: boolean) {
+      if (typeof toggle === "boolean") identifyOnResolve = toggle;
+      return identifyOnResolve;
     },
 
     resolve: <InputType extends Input, OutputType extends Output>(
@@ -255,6 +330,9 @@ export const constructStack = <Input extends object, Output extends object>(): M
         .map((entry) => entry.middleware)
         .reverse()) {
         handler = middleware(handler as Handler<Input, OutputType>, context) as any;
+      }
+      if (identifyOnResolve) {
+        console.log(stack.identify());
       }
       return handler as Handler<InputType, OutputType>;
     },

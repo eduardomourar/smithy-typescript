@@ -19,6 +19,10 @@ import java.nio.charset.StandardCharsets.UTF_8
 rootProject.name = "smithy-typescript"
 include(":smithy-typescript-codegen")
 include(":smithy-typescript-codegen-test")
+include(":smithy-typescript-protocol-test-codegen")
+include(":smithy-typescript-codegen-test:example-weather-customizations")
+include(":smithy-typescript-codegen-test:released-version-test")
+include(":smithy-typescript-ssdk-codegen-test-utils")
 
 file(
     java.nio.file.Paths.get(rootProject.projectDir.absolutePath, "local.properties"))
@@ -35,6 +39,12 @@ file(
     }
 
 pluginManagement {
+    val smithyGradleVersion: String by settings
+    plugins {
+        id("software.amazon.smithy.gradle.smithy-jar").version(smithyGradleVersion)
+        id("software.amazon.smithy.gradle.smithy-base").version(smithyGradleVersion)
+    }
+
     repositories {
         mavenLocal()
         mavenCentral()

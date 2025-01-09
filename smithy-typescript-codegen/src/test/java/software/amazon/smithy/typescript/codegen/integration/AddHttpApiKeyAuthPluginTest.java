@@ -26,25 +26,26 @@ import software.amazon.smithy.build.PluginContext;
 import software.amazon.smithy.model.Model;
 import software.amazon.smithy.model.node.Node;
 import software.amazon.smithy.typescript.codegen.CodegenUtils;
-import software.amazon.smithy.typescript.codegen.TypeScriptCodegenPlugin;
+import software.amazon.smithy.typescript.codegen.TypeScriptClientCodegenPlugin;
 
 public class AddHttpApiKeyAuthPluginTest {
     @Test
     public void httpApiKeyAuthClientOnService() {
-        testInjects("http-api-key-auth-trait.smithy", ", { scheme: 'ApiKey', in: 'header', name: 'Authorization'}");
+        testInjects("http-api-key-auth-trait.smithy",
+                "in: 'header', name: 'Authorization', scheme: 'ApiKey'");
     }
 
     @Test
     public void httpApiKeyAuthClientOnOperation() {
         testInjects("http-api-key-auth-trait-on-operation.smithy",
-                ", { scheme: 'ApiKey', in: 'header', name: 'Authorization'}");
+                "in: 'header', name: 'Authorization', scheme: 'ApiKey'");
     }
 
     // This should be identical to the httpApiKeyAuthClient test except for the parameters provided
     // to the middleware.
     @Test
     public void httpApiKeyAuthClientNoScheme() {
-        testInjects("http-api-key-auth-trait-no-scheme.smithy", ", { in: 'header', name: 'Authorization'}");
+        testInjects("http-api-key-auth-trait-no-scheme.smithy", "in: 'header', name: 'Authorization'");
     }
 
     private void testInjects(String filename, String extra) {
@@ -59,14 +60,16 @@ public class AddHttpApiKeyAuthPluginTest {
         // Ensure that the GetFoo operation imports the middleware and uses it with all the options.
         assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/commands/GetFooCommand.ts").get(),
                 containsString("from \"../middleware/HttpApiKeyAuth\""));
-        assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/commands/GetFooCommand.ts").get(),
-                containsString("this.middlewareStack.use(getHttpApiKeyAuthPlugin(configuration" + extra + "));"));
+
+        String generatedGetFooCommand = manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/commands/GetFooCommand.ts").get();
+        assertThat(generatedGetFooCommand, containsString("getHttpApiKeyAuthPlugin(config"));
+        assertThat(generatedGetFooCommand, containsString(extra));
 
         // Ensure that the GetBar operation does not import the middleware or use it.
         assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/commands/GetBarCommand.ts").get(),
                 not(containsString("from \"../middleware/HttpApiKeyAuth\"")));
         assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/commands/GetBarCommand.ts").get(),
-                not(containsString("this.middlewareStack.use(getHttpApiKeyAuthPlugin")));
+                not(containsString("getHttpApiKeyAuthPlugin")));
 
         // Make sure that the middleware file was written and exports the plugin symbol.
         assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/middleware/HttpApiKeyAuth/index.ts").get(),
@@ -74,7 +77,7 @@ public class AddHttpApiKeyAuthPluginTest {
 
         // Ensure that the middleware was being exported in the index file.
         assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/index.ts").get(),
-                containsString("from \"./middleware/HttpApiKeyAuth\""));  
+                containsString("from \"./middleware/HttpApiKeyAuth\""));
     }
 
     private MockManifest generate(String filename)
@@ -92,10 +95,11 @@ public class AddHttpApiKeyAuthPluginTest {
                         .withMember("service", Node.from("smithy.example#Example"))
                         .withMember("package", Node.from("example"))
                         .withMember("packageVersion", Node.from("1.0.0"))
+                        .withMember("useLegacyAuth", Node.from(true))
                         .build())
                 .build();
 
-        new TypeScriptCodegenPlugin().execute(context);
+        new TypeScriptClientCodegenPlugin().execute(context);
 
         return manifest;
     }
@@ -123,7 +127,7 @@ public class AddHttpApiKeyAuthPluginTest {
         assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/commands/GetFooCommand.ts").get(),
                 not(containsString("from \"../middleware/HttpApiKeyAuth\"")));
         assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/commands/GetFooCommand.ts").get(),
-                not(containsString("this.middlewareStack.use(getHttpApiKeyAuthPlugin(configuration")));
+                not(containsString("getHttpApiKeyAuthPlugin(configuration")));
 
         // Make sure that the middleware file was not written.
         assertThat(manifest.hasFile(CodegenUtils.SOURCE_FOLDER + "/middleware/HttpApiKeyAuth/index.ts"),
@@ -131,6 +135,6 @@ public class AddHttpApiKeyAuthPluginTest {
 
         // Ensure that the middleware was not being exported in the index file.
         assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/index.ts").get(),
-            not(containsString("from \"./middleware/HttpApiKeyAuth\""))); 
+            not(containsString("from \"./middleware/HttpApiKeyAuth\"")));
     }
 }

@@ -40,6 +40,12 @@ export type WaiterResult = {
    * (optional) Indicates a reason for why a waiter has reached its state.
    */
   reason?: any;
+
+  /**
+   * Responses observed by the waiter during its polling, where the value
+   * is the count.
+   */
+  observedResponses?: Record<string, number>;
 };
 
 /**
@@ -68,7 +74,7 @@ export const checkExceptions = (result: WaiterResult): WaiterResult => {
     timeoutError.name = "TimeoutError";
     throw timeoutError;
   } else if (result.state !== WaiterState.SUCCESS) {
-    throw new Error(`${JSON.stringify({ result })}`);
+    throw new Error(`${JSON.stringify(result)}`);
   }
   return result;
 };

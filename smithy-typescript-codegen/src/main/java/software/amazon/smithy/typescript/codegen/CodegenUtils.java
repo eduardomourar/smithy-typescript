@@ -143,18 +143,23 @@ public final class CodegenUtils {
         MemberShape streamingMember,
         String commandName
     ) {
+        writer.addImport("StreamingBlobPayloadInputTypes", null, TypeScriptDependency.SMITHY_TYPES);
         String memberName = streamingMember.getMemberName();
         String optionalSuffix = streamingMember.isRequired() ? "" : "?";
-        writer.openBlock("export type $LType = Omit<$T, $S> & {", "};", typeName,
-                containerSymbol, memberName, () -> {
-                        writer.writeDocs(String.format("For *`%1$s[\"%2$s\"]`*, see {@link %1$s.%2$s}.",
-                                containerSymbol.getName(), memberName));
-                        writer.write("$1L$2L: $3T[$1S]|string|Uint8Array|Buffer;", memberName, optionalSuffix,
-                                containerSymbol);
-        });
 
         writer.writeDocs("@public\n\nThe input for {@link " + commandName + "}.");
-        writer.write("export interface $1L extends $1LType {}", typeName);
+        writer.write(
+            """
+            export interface $L extends Omit<$T, $S> {
+                $L$L: StreamingBlobPayloadInputTypes;
+            }
+            """,
+            typeName,
+            containerSymbol,
+            memberName,
+            memberName,
+            optionalSuffix
+        );
     }
 
     /**
@@ -170,16 +175,22 @@ public final class CodegenUtils {
         String commandName
     ) {
         String memberName = streamingMember.getMemberName();
+        String optionalSuffix = streamingMember.isRequired() ? "" : "?";
         writer.addImport("MetadataBearer", "__MetadataBearer", TypeScriptDependency.SMITHY_TYPES);
-        writer.addImport("SdkStream", "__SdkStream", TypeScriptDependency.SMITHY_TYPES);
-        writer.addImport("WithSdkStreamMixin", "__WithSdkStreamMixin", TypeScriptDependency.SMITHY_TYPES);
+        writer.addImport("StreamingBlobPayloadOutputTypes", null, TypeScriptDependency.SMITHY_TYPES);
 
         writer.writeDocs("@public\n\nThe output of {@link " + commandName + "}.");
         writer.write(
-            "export interface $L extends __WithSdkStreamMixin<$T, $S>, __MetadataBearer {}",
+            """
+            export interface $L extends Omit<$T, $S>, __MetadataBearer {
+                $L$L: StreamingBlobPayloadOutputTypes;
+            }
+            """,
             typeName,
             containerSymbol,
-            memberName
+            memberName,
+            memberName,
+            optionalSuffix
         );
     }
 
@@ -204,13 +215,13 @@ public final class CodegenUtils {
         String memberName = payloadMember.getMemberName();
         String optionalSuffix = payloadMember.isRequired() ? "" : "?";
 
-        writer.addImport("BlobTypes", null, TypeScriptDependency.AWS_SDK_TYPES);
+        writer.addImport("BlobPayloadInputTypes", null, TypeScriptDependency.SMITHY_TYPES);
 
         writer.writeDocs("@public");
         writer.write(
             """
             export type $LType = Omit<$T, $S> & {
-              $L: BlobTypes;
+              $L: BlobPayloadInputTypes;
             };
             """,
             typeName,
@@ -260,35 +271,51 @@ public final class CodegenUtils {
      * Returns the list of function parameter key-value pairs to be written for
      * provided parameters map.
      *
-     * @param paramsMap Map of paramters to generate a parameters string for.
+     * @param paramsMap Map of parameters to generate a parameters string for.
      * @return The list of parameters to be written.
      */
     static List<String> getFunctionParametersList(Map<String, Object> paramsMap) {
         List<String> functionParametersList = new ArrayList<String>();
+        List<Map.Entry<String, Object>> sortedParamsMap = paramsMap.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .toList();
 
-        if (!paramsMap.isEmpty()) {
-            for (Map.Entry<String, Object> param : paramsMap.entrySet()) {
+        if (!sortedParamsMap.isEmpty()) {
+            for (Map.Entry<String, Object> param : sortedParamsMap) {
                 String key = param.getKey();
                 Object value = param.getValue();
                 if (value instanceof Symbol) {
                     String symbolName = ((Symbol) value).getName();
                     if (key.equals(symbolName)) {
-                        functionParametersList.add(key);
+                        functionParametersList.add(String.format("$%s:T", symbolName));
                     } else {
-                        functionParametersList.add(String.format("%s: %s", key, symbolName));
+                        functionParametersList.add(String.format("%s: $%s:T", key, key));
                     }
                 } else if (value instanceof String) {
                     functionParametersList.add(String.format("%s: '%s'", key, value));
                 } else if (value instanceof Boolean) {
                     functionParametersList.add(String.format("%s: %s", key, value));
                 } else if (value instanceof List) {
-                    if (!((List) value).isEmpty() && !(((List) value).get(0) instanceof String)) {
-                        throw new CodegenException("Plugin function parameters not supported for type List<"
-                            + ((List) value).get(0).getClass() + ">");
+                    List<?> valueList = (List<?>) value;
+                    if (!valueList.isEmpty() && !(valueList.get(0) instanceof String)) {
+                        throw new CodegenException("Plugin function parameters list must be List<String>");
                     }
-                    functionParametersList.add(String.format("%s: [%s]",
-                        key, ((List<String>) value).stream()
-                            .collect(Collectors.joining("\", \"", "\"", "\""))));
+                    List<String> valueStringList = valueList.stream()
+                        .map(item -> String.format("'%s'", item))
+                        .collect(Collectors.toList());
+                    functionParametersList.add(String.format("'%s': [%s]",
+                        key, valueStringList.stream().collect(Collectors.joining(", "))));
+                } else if (value instanceof Map) {
+                    Map<?, ?> valueMap = (Map<?, ?>) value;
+                    if (!valueMap.isEmpty() && valueMap.keySet().stream().anyMatch(k -> !(k instanceof String))
+                        && valueMap.values().stream().anyMatch(v -> !(v instanceof String))) {
+                        throw new CodegenException("Plugin function parameters map must be Map<String, String>");
+                    }
+                    List<String> valueStringList = valueMap.entrySet().stream()
+                        .map(entry -> String.format("'%s': '%s'", entry.getKey(), entry.getValue()))
+                        .collect(Collectors.toList());
+                    functionParametersList.add(String.format("%s: {%s}",
+                        key, valueStringList.stream().collect(Collectors.joining(", "))));
                 } else {
                     // Future support for param type should be added in else if.
                     throw new CodegenException("Plugin function parameters not supported for type "

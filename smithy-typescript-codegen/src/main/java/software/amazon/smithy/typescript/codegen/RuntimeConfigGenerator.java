@@ -15,14 +15,25 @@
 
 package software.amazon.smithy.typescript.codegen;
 
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 import software.amazon.smithy.build.SmithyBuildException;
+import software.amazon.smithy.codegen.core.CodegenException;
+import software.amazon.smithy.codegen.core.Symbol;
 import software.amazon.smithy.codegen.core.SymbolProvider;
 import software.amazon.smithy.model.Model;
+import software.amazon.smithy.model.knowledge.ServiceIndex;
+import software.amazon.smithy.model.knowledge.TopDownIndex;
 import software.amazon.smithy.model.shapes.ServiceShape;
+import software.amazon.smithy.model.shapes.ShapeId;
+import software.amazon.smithy.typescript.codegen.auth.AuthUtils;
+import software.amazon.smithy.typescript.codegen.auth.http.HttpAuthScheme;
+import software.amazon.smithy.typescript.codegen.auth.http.SupportedHttpAuthSchemesIndex;
 import software.amazon.smithy.typescript.codegen.integration.TypeScriptIntegration;
 import software.amazon.smithy.utils.MapUtils;
 import software.amazon.smithy.utils.SmithyInternalApi;
@@ -41,12 +52,13 @@ final class RuntimeConfigGenerator {
     private final SymbolProvider symbolProvider;
     private final TypeScriptDelegator delegator;
     private final List<TypeScriptIntegration> integrations;
+    private final ApplicationProtocol applicationProtocol;
     private final Map<String, Consumer<TypeScriptWriter>> nodeRuntimeConfigDefaults = MapUtils.of(
             "requestHandler", writer -> {
                 writer.addDependency(TypeScriptDependency.AWS_SDK_NODE_HTTP_HANDLER);
                 writer.addImport("NodeHttpHandler", "RequestHandler",
                         TypeScriptDependency.AWS_SDK_NODE_HTTP_HANDLER);
-                writer.write("new RequestHandler(defaultConfigProvider)");
+                writer.write("RequestHandler.create(config?.requestHandler ?? defaultConfigProvider)");
             },
             "sha256", writer -> {
                 writer.addDependency(TypeScriptDependency.AWS_SDK_HASH_NODE);
@@ -69,7 +81,7 @@ final class RuntimeConfigGenerator {
                 writer.addDependency(TypeScriptDependency.AWS_SDK_FETCH_HTTP_HANDLER);
                 writer.addImport("FetchHttpHandler", "RequestHandler",
                         TypeScriptDependency.AWS_SDK_FETCH_HTTP_HANDLER);
-                writer.write("new RequestHandler(defaultConfigProvider)");
+                writer.write("RequestHandler.create(config?.requestHandler ?? defaultConfigProvider)");
             },
             "sha256", writer -> {
                 writer.addDependency(TypeScriptDependency.AWS_CRYPTO_SHA256_BROWSER);
@@ -128,7 +140,13 @@ final class RuntimeConfigGenerator {
                 writer.addImport("toUtf8", null,
                         TypeScriptDependency.AWS_SDK_UTIL_UTF8);
                 writer.write("toUtf8");
+            },
+            "extensions", writer -> {
+                writer.write("[]");
             }
+    );
+    private final Map<String, String> runtimeConfigDefaultValuePrefixes = MapUtils.of(
+        "requestHandler", ""
     );
 
     RuntimeConfigGenerator(
@@ -136,7 +154,8 @@ final class RuntimeConfigGenerator {
             Model model,
             SymbolProvider symbolProvider,
             TypeScriptDelegator delegator,
-            List<TypeScriptIntegration> integrations
+            List<TypeScriptIntegration> integrations,
+            ApplicationProtocol applicationProtocol
     ) {
         this.settings = settings;
         this.model = model;
@@ -144,6 +163,7 @@ final class RuntimeConfigGenerator {
         this.symbolProvider = symbolProvider;
         this.delegator = delegator;
         this.integrations = integrations;
+        this.applicationProtocol = applicationProtocol;
     }
 
     void generate(LanguageTarget target) {
@@ -153,31 +173,233 @@ final class RuntimeConfigGenerator {
                     .replaceFirst(CodegenUtils.SOURCE_FOLDER + "/", ""))
                 .replace("${clientConfigName}", symbolProvider.toSymbol(service).getName() + "Config")
                 .replace("${apiVersion}", service.getVersion())
-                .replace("$", "$$") // sanitize template place holders.
-                .replace("$${customizations}", "${L@customizations}");
+                .replace("${", "$${") // sanitize template place holders.
+                .replace("$${customizations}", "${L@customizations}")
+                .replace("$${prepareCustomizations}", "${L@prepareCustomizations}");
 
         delegator.useFileWriter(target.getTargetFilename(), writer -> {
             // Inject customizations into the ~template.
+            writer.onSection("prepareCustomizations", original -> {
+                for (TypeScriptIntegration integration : integrations) {
+                    integration.prepareCustomizations(writer, target, settings, model);
+                }
+            });
             writer.indent().onSection("customizations", original -> {
                 // Start with defaults, use a TreeMap for keeping entries sorted.
                 Map<String, Consumer<TypeScriptWriter>> configs =
-                        new TreeMap<>(getDefaultRuntimeConfigs(target));
+                    new TreeMap<>(getDefaultRuntimeConfigs(target));
+
                 // Add any integration supplied runtime config writers.
                 for (TypeScriptIntegration integration : integrations) {
-                    configs.putAll(integration.getRuntimeConfigWriters(settings, model, symbolProvider, target));
+                    configs.putAll(
+                        integration.getRuntimeConfigWriters(settings, model, symbolProvider, target)
+                    );
+                }
+                // Needs a separate integration point since not all the information is accessible in
+                // {@link TypeScriptIntegration#getRuntimeConfigWriters()}
+                if (applicationProtocol.isHttpProtocol() && !settings.useLegacyAuth()) {
+                    generateHttpAuthSchemeConfig(configs, writer, target);
                 }
                 int indentation = target.equals(LanguageTarget.SHARED) ? 1 : 2;
                 configs.forEach((key, value) -> {
-                    writer.indent(indentation).disableNewlines().openBlock("$1L: config?.$1L ?? ", ",\n", key,
-                        () -> {
-                            value.accept(writer);
-                        });
-                    writer.dedent(indentation);
+                    String valuePrefix =
+                        runtimeConfigDefaultValuePrefixes.getOrDefault(key, "config?.$1L ?? ");
+                    writer
+                        .indent(indentation)
+                        .disableNewlines()
+                        .openBlock(
+                            "$1L: " + valuePrefix, ",\n", key,
+                            () -> {
+                                value.accept(writer);
+                            }
+                        )
+                        .dedent(indentation);
                 });
             });
             writer.dedent();
-            writer.write(contents, "");
+            writer.write(contents, "", "");
         });
+    }
+
+    private void generateHttpAuthSchemeConfig(
+        Map<String, Consumer<TypeScriptWriter>> configs,
+        TypeScriptWriter writer,
+        LanguageTarget target
+    ) {
+        SupportedHttpAuthSchemesIndex authIndex = new SupportedHttpAuthSchemesIndex(integrations, model, settings);
+
+        if (target.equals(LanguageTarget.SHARED)) {
+            configs.put("httpAuthSchemeProvider", w -> {
+                w.write("$T", Symbol.builder()
+                        .name("default"
+                            + CodegenUtils.getServiceName(settings, model, symbolProvider)
+                            + "HttpAuthSchemeProvider")
+                        .namespace(AuthUtils.AUTH_HTTP_PROVIDER_DEPENDENCY.getPackageName(), "/")
+                        .build());
+            });
+        }
+
+        ServiceIndex serviceIndex = ServiceIndex.of(model);
+        TopDownIndex topDownIndex = TopDownIndex.of(model);
+        Map<ShapeId, HttpAuthScheme> allEffectiveHttpAuthSchemes =
+            AuthUtils.getAllEffectiveNoAuthAwareAuthSchemes(service, serviceIndex, authIndex, topDownIndex);
+        List<HttpAuthSchemeTarget> targetAuthSchemes = getHttpAuthSchemeTargets(target, allEffectiveHttpAuthSchemes);
+
+        // Generate only if the "inherited" target is different than the current target
+        List<HttpAuthSchemeTarget> inheritedAuthSchemes = Collections.emptyList();
+        // Always generated the SHARED target
+        if (target.equals(LanguageTarget.SHARED)) {
+            // no-op
+        // NODE and BROWSER inherit from SHARED
+        } else if (target.equals(LanguageTarget.NODE) || target.equals(LanguageTarget.BROWSER)) {
+            inheritedAuthSchemes = getHttpAuthSchemeTargets(LanguageTarget.SHARED, allEffectiveHttpAuthSchemes);
+        // REACT_NATIVE inherits from BROWSER
+        } else if (target.equals(LanguageTarget.REACT_NATIVE)) {
+            inheritedAuthSchemes = getHttpAuthSchemeTargets(LanguageTarget.BROWSER, allEffectiveHttpAuthSchemes);
+        } else {
+            throw new CodegenException("Unhandled Language Target: " + target);
+        }
+
+        // If target and inherited auth schemes are equal, then don't generate target auth schemes.
+        if (targetAuthSchemes.equals(inheritedAuthSchemes)) {
+            return;
+        }
+
+        configs.put("httpAuthSchemes", w -> {
+            w.addDependency(TypeScriptDependency.SMITHY_TYPES);
+            w.addImport("IdentityProviderConfig", null, TypeScriptDependency.SMITHY_TYPES);
+            w.openBlock("[", "]", () -> {
+                Iterator<HttpAuthSchemeTarget> iter = targetAuthSchemes.iterator();
+                while (iter.hasNext()) {
+                    HttpAuthSchemeTarget entry = iter.next();
+                    if (entry.identityProvider == null) {
+                        w.write("""
+                            {
+                              schemeId: $S,
+                              identityProvider: (ipc: IdentityProviderConfig) =>
+                                ipc.getIdentityProvider($S),
+                              signer: $C,
+                            }""",
+                            entry.httpAuthScheme.getSchemeId(),
+                            entry.httpAuthScheme.getSchemeId(),
+                            entry.signer);
+                    } else {
+                        w.write("""
+                            {
+                              schemeId: $S,
+                              identityProvider: (ipc: IdentityProviderConfig) =>
+                                ipc.getIdentityProvider($S) || ($C),
+                              signer: $C,
+                            }""",
+                            entry.httpAuthScheme.getSchemeId(),
+                            entry.httpAuthScheme.getSchemeId(),
+                            entry.identityProvider,
+                            entry.signer);
+                    }
+                    if (iter.hasNext()) {
+                        w.writeInline(", ");
+                    }
+                }
+            });
+        });
+    }
+
+    private static class HttpAuthSchemeTarget {
+        public HttpAuthScheme httpAuthScheme;
+        public Consumer<TypeScriptWriter> identityProvider;
+        public Consumer<TypeScriptWriter> signer;
+
+        HttpAuthSchemeTarget(
+            HttpAuthScheme httpAuthScheme,
+            Consumer<TypeScriptWriter> identityProvider,
+            Consumer<TypeScriptWriter> signer
+        ) {
+            this.httpAuthScheme = httpAuthScheme;
+            this.identityProvider = identityProvider;
+            this.signer = signer;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (!(other instanceof HttpAuthSchemeTarget)) {
+                return false;
+            }
+            HttpAuthSchemeTarget o = (HttpAuthSchemeTarget) other;
+            return Objects.equals(httpAuthScheme, o.httpAuthScheme)
+                && Objects.equals(identityProvider, o.identityProvider)
+                && Objects.equals(signer, o.signer);
+        }
+
+        @Override
+        public int hashCode() {
+            return super.hashCode();
+        }
+    }
+
+    private List<HttpAuthSchemeTarget> getHttpAuthSchemeTargets(
+        LanguageTarget target,
+        Map<ShapeId, HttpAuthScheme> httpAuthSchemes
+    ) {
+        return getPartialHttpAuthSchemeTargets(target, httpAuthSchemes)
+            .values()
+            .stream()
+            .filter(httpAuthSchemeTarget -> httpAuthSchemeTarget.signer != null)
+            .toList();
+    }
+
+    private Map<ShapeId, HttpAuthSchemeTarget> getPartialHttpAuthSchemeTargets(
+        LanguageTarget target,
+        Map<ShapeId, HttpAuthScheme> httpAuthSchemes
+    ) {
+        LanguageTarget inherited;
+        if (target.equals(LanguageTarget.SHARED)) {
+            // SHARED doesn't inherit any target, so inherited is null
+            inherited = null;
+        } else if (target.equals(LanguageTarget.NODE) || target.equals(LanguageTarget.BROWSER)) {
+            inherited = LanguageTarget.SHARED;
+        } else if (target.equals(LanguageTarget.REACT_NATIVE)) {
+            inherited = LanguageTarget.BROWSER;
+        } else {
+            throw new CodegenException("Unsupported Language Target: " + target);
+        }
+
+        Map<ShapeId, HttpAuthSchemeTarget> httpAuthSchemeTargets = inherited == null
+            // SHARED inherits no HttpAuthSchemeTargets
+            ? new TreeMap<>()
+            // Otherwise, get inherited HttpAuthSchemeTargets
+            : getPartialHttpAuthSchemeTargets(inherited, httpAuthSchemes);
+
+        for (HttpAuthScheme httpAuthScheme : httpAuthSchemes.values()) {
+            // If HttpAuthScheme is not registered, skip code generation
+            if (httpAuthScheme == null) {
+                continue;
+            }
+
+            // Get identity provider and signer for the current target
+            Consumer<TypeScriptWriter> identityProvider =
+                httpAuthScheme.getDefaultIdentityProviders().get(target);
+            Consumer<TypeScriptWriter> signer =
+                httpAuthScheme.getDefaultSigners().get(target);
+
+            HttpAuthSchemeTarget existingEntry =
+                httpAuthSchemeTargets.get(httpAuthScheme.getSchemeId());
+
+            // If HttpAuthScheme is not added yet, add the entry
+            if (existingEntry == null) {
+                httpAuthSchemeTargets.put(httpAuthScheme.getSchemeId(),
+                    new HttpAuthSchemeTarget(httpAuthScheme, identityProvider, signer));
+                continue;
+            }
+
+            // Mutate existing entry for identity provider and signer if available
+            if (identityProvider != null) {
+                existingEntry.identityProvider = identityProvider;
+            }
+            if (signer != null) {
+                existingEntry.signer = signer;
+            }
+        }
+        return httpAuthSchemeTargets;
     }
 
     private Map<String, Consumer<TypeScriptWriter>> getDefaultRuntimeConfigs(LanguageTarget target) {

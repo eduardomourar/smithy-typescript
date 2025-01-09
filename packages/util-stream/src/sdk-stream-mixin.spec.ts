@@ -1,11 +1,11 @@
 import { SdkStreamMixin } from "@smithy/types";
 import { fromArrayBuffer } from "@smithy/util-buffer-from";
 import { PassThrough, Readable, Writable } from "stream";
-import util from "util";
+import { afterAll, beforeAll, beforeEach, describe, expect, test as it, vi } from "vitest";
 
 import { sdkStreamMixin } from "./sdk-stream-mixin";
 
-jest.mock("@smithy/util-buffer-from");
+vi.mock("@smithy/util-buffer-from");
 
 describe(sdkStreamMixin.name, () => {
   const writeDataToStream = (stream: Writable, data: Array<ArrayBufferLike>): Promise<void> =>
@@ -28,7 +28,7 @@ describe(sdkStreamMixin.name, () => {
     for (const method of transformMethods) {
       try {
         await sdkStream[method]();
-        fail(new Error("expect subsequent tranform to fail"));
+        fail(new Error("expect subsequent transform to fail"));
       } catch (error) {
         expect(error.message).toContain("The stream has already been transformed");
       }
@@ -37,6 +37,21 @@ describe(sdkStreamMixin.name, () => {
 
   beforeEach(() => {
     passThrough = new PassThrough();
+  });
+
+  it("should attempt to use the ReadableStream version if the input is not a Readable", async () => {
+    if (typeof ReadableStream !== "undefined") {
+      // ReadableStream is global only as of Node.js 18.
+      const sdkStream = sdkStreamMixin(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(Buffer.from("abcd"));
+            controller.close();
+          },
+        })
+      );
+      expect(await sdkStream.transformToByteArray()).toEqual(new Uint8Array([97, 98, 99, 100]));
+    }
   });
 
   it("should throw if unexpected stream implementation is supplied", () => {
@@ -58,7 +73,7 @@ describe(sdkStreamMixin.name, () => {
       expect(await sdkStream.transformToByteArray()).toEqual(expected);
     });
 
-    it("should fail any subsequent tranform calls", async () => {
+    it("should fail any subsequent transform calls", async () => {
       const sdkStream = sdkStreamMixin(passThrough);
       await writeDataToStream(passThrough, [Buffer.from("abc")]);
       expect(await sdkStream.transformToByteArray()).toEqual(byteArrayFromBuffer(Buffer.from("abc")));
@@ -67,13 +82,15 @@ describe(sdkStreamMixin.name, () => {
   });
 
   describe("transformToString", () => {
-    const toStringMock = jest.fn();
+    const toStringMock = vi.fn();
     beforeAll(() => {
-      jest.resetAllMocks();
+      vi.resetAllMocks();
     });
 
     it("should transform the stream to string with utf-8 encoding by default", async () => {
-      (fromArrayBuffer as jest.Mock).mockImplementation(jest.requireActual("@smithy/util-buffer-from").fromArrayBuffer);
+      vi.mocked(fromArrayBuffer).mockImplementation(
+        ((await vi.importActual("@smithy/util-buffer-from")) as any).fromArrayBuffer
+      );
       const sdkStream = sdkStreamMixin(passThrough);
       await writeDataToStream(passThrough, [Buffer.from("foo")]);
       const transformed = await sdkStream.transformToString();
@@ -83,7 +100,7 @@ describe(sdkStreamMixin.name, () => {
     it.each([undefined, "utf-8", "ascii", "base64", "latin1", "binary"])(
       "should transform the stream to string with %s encoding",
       async (encoding) => {
-        (fromArrayBuffer as jest.Mock).mockReturnValue({ toString: toStringMock });
+        vi.mocked(fromArrayBuffer).mockReturnValue({ toString: toStringMock } as any);
         const sdkStream = sdkStreamMixin(passThrough);
         await writeDataToStream(passThrough, [Buffer.from("foo")]);
         await sdkStream.transformToString(encoding);
@@ -94,21 +111,21 @@ describe(sdkStreamMixin.name, () => {
     it.each(["ibm866", "iso-8859-2", "koi8-r", "macintosh", "windows-874", "gbk", "gb18030", "euc-jp"])(
       "should transform the stream to string with TextDecoder config %s",
       async (encoding) => {
-        jest.spyOn(util, "TextDecoder").mockImplementation(
+        vi.spyOn(global, "TextDecoder").mockImplementation(
           () =>
             ({
-              decode: jest.fn(),
-            } as any)
+              decode: vi.fn(),
+            }) as any
         );
-        (fromArrayBuffer as jest.Mock).mockReturnValue({ toString: toStringMock });
+        vi.mocked(fromArrayBuffer).mockReturnValue({ toString: toStringMock } as any);
         const sdkStream = sdkStreamMixin(passThrough);
         await writeDataToStream(passThrough, [Buffer.from("foo")]);
         await sdkStream.transformToString(encoding as BufferEncoding);
-        expect(util.TextDecoder).toBeCalledWith(encoding);
+        expect(TextDecoder).toBeCalledWith(encoding);
       }
     );
 
-    it("should fail any subsequent tranform calls", async () => {
+    it("should fail any subsequent transform calls", async () => {
       const sdkStream = sdkStreamMixin(passThrough);
       await writeDataToStream(passThrough, [Buffer.from("foo")]);
       await sdkStream.transformToString();
@@ -129,14 +146,12 @@ describe(sdkStreamMixin.name, () => {
     });
 
     describe("when Readable.toWeb() is not supported", () => {
-      // @ts-expect-error
       const originalToWebImpl = Readable.toWeb;
       beforeAll(() => {
         // @ts-expect-error
         Readable.toWeb = undefined;
       });
       afterAll(() => {
-        // @ts-expect-error
         Readable.toWeb = originalToWebImpl;
       });
 
@@ -152,26 +167,22 @@ describe(sdkStreamMixin.name, () => {
     });
 
     describe("when Readable.toWeb() is supported", () => {
-      // @ts-expect-error
       const originalToWebImpl = Readable.toWeb;
       beforeAll(() => {
-        // @ts-expect-error
-        Readable.toWeb = jest.fn().mockReturnValue("A web stream");
+        Readable.toWeb = vi.fn().mockReturnValue("A web stream");
       });
 
       afterAll(() => {
-        // @ts-expect-error
         Readable.toWeb = originalToWebImpl;
       });
 
-      it("should tranform Node stream to web stream", async () => {
+      it("should transform Node stream to web stream", async () => {
         const sdkStream = sdkStreamMixin(passThrough);
         sdkStream.transformToWebStream();
-        // @ts-expect-error
         expect(Readable.toWeb).toBeCalled();
       });
 
-      it("should fail any subsequent tranform calls", async () => {
+      it("should fail any subsequent transform calls", async () => {
         const sdkStream = sdkStreamMixin(passThrough);
         await writeDataToStream(passThrough, [Buffer.from("foo")]);
         await sdkStream.transformToWebStream();

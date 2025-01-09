@@ -1,4 +1,4 @@
-import { AuthScheme } from "./auth";
+import { AuthScheme } from "./auth/auth";
 
 /**
  * @public
@@ -85,4 +85,4 @@ export interface EndpointV2 {
 /**
  * @public
  */
-export type EndpointParameters = { [name: string]: undefined | string | boolean };
+export type EndpointParameters = { [name: string]: undefined | boolean | string | string[] };

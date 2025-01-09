@@ -16,6 +16,7 @@
 package software.amazon.smithy.typescript.codegen.integration;
 
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 import software.amazon.smithy.codegen.core.CodegenException;
@@ -30,6 +31,7 @@ import software.amazon.smithy.typescript.codegen.ApplicationProtocol;
 import software.amazon.smithy.typescript.codegen.TypeScriptDelegator;
 import software.amazon.smithy.typescript.codegen.TypeScriptSettings;
 import software.amazon.smithy.typescript.codegen.TypeScriptWriter;
+import software.amazon.smithy.typescript.codegen.util.StringStore;
 import software.amazon.smithy.utils.CaseUtils;
 import software.amazon.smithy.utils.SmithyUnstableApi;
 
@@ -303,6 +305,23 @@ public interface ProtocolGenerator {
     }
 
     /**
+     * Returns a map of error names to their {@link ShapeId}.
+     *
+     * @param context the generation context
+     * @param operations the operation shapes to retrieve errors for
+     * @return map of error names to {@link ShapeId}
+     */
+    default Map<String, ShapeId> getOperationErrors(GenerationContext context, Collection<OperationShape> operations) {
+        Map<String, ShapeId> errors = new LinkedHashMap<>();
+        for (OperationShape operation : operations) {
+            errors.putAll(
+                getOperationErrors(context, operation)
+            );
+        }
+        return errors;
+    }
+
+    /**
      * Context object used for service serialization and deserialization.
      */
     class GenerationContext {
@@ -313,6 +332,7 @@ public interface ProtocolGenerator {
         private TypeScriptDelegator writerDelegator;
         private TypeScriptWriter writer;
         private String protocolName;
+        private StringStore stringStore = new StringStore();
 
         public TypeScriptSettings getSettings() {
             return settings;
@@ -399,6 +419,10 @@ public interface ProtocolGenerator {
             GenerationContext copyContext = copy();
             copyContext.setWriter(newWriter);
             return copyContext;
+        }
+
+        public StringStore getStringStore() {
+            return stringStore;
         }
     }
 }

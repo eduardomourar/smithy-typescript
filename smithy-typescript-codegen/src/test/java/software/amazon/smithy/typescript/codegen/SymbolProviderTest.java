@@ -14,6 +14,7 @@ import software.amazon.smithy.model.node.Node;
 import software.amazon.smithy.model.shapes.IntEnumShape;
 import software.amazon.smithy.model.shapes.ListShape;
 import software.amazon.smithy.model.shapes.MemberShape;
+import software.amazon.smithy.model.shapes.ResourceShape;
 import software.amazon.smithy.model.shapes.Shape;
 import software.amazon.smithy.model.shapes.ShapeId;
 import software.amazon.smithy.model.shapes.StringShape;
@@ -190,11 +191,11 @@ public class SymbolProviderTest {
         SymbolProvider provider = new SymbolVisitor(model, settings);
         Symbol memberSymbol = provider.toSymbol(member);
 
-        assertThat(memberSymbol.getName(), equalTo("__LazyJsonString | string"));
+        assertThat(memberSymbol.getName(), equalTo("__AutomaticJsonStringConversion | string"));
     }
 
     @Test
-    public void addsUnknownStringEnumVariant() {
+    public void omitsUnknownStringEnumVariant() {
         EnumTrait trait = EnumTrait.builder()
                 .addEnum(EnumDefinition.builder().value("FOO").name("FOO").build())
                 .addEnum(EnumDefinition.builder().value("BAR").name("BAR").build())
@@ -218,11 +219,11 @@ public class SymbolProviderTest {
         SymbolProvider provider = new SymbolVisitor(model, settings);
         Symbol memberSymbol = provider.toSymbol(member);
 
-        assertThat(memberSymbol.getName(), equalTo("EnumString | string"));
+        assertThat(memberSymbol.getName(), equalTo("EnumString"));
     }
 
     @Test
-    public void addsUnknownNumberIntEnumVariant() {
+    public void omitsUnknownNumberIntEnumVariant() {
         IntEnumShape shape = IntEnumShape.builder()
                 .id("com.foo#Foo")
                 .addMember("BAR", 2)
@@ -246,7 +247,33 @@ public class SymbolProviderTest {
         SymbolProvider provider = new SymbolVisitor(model, settings);
         Symbol memberSymbol = provider.toSymbol(member);
 
-        assertThat(memberSymbol.getName(), equalTo("Foo | number"));
+        assertThat(memberSymbol.getName(), equalTo("Foo"));
     }
 
+    @Test
+    public void placesResourceShapeIntoInitialBucket() {
+        Shape shape1 = StructureShape.builder().id("com.foo#Hello").build();
+        Shape shape2 = ResourceShape.builder().id("com.foo.baz#Hello").build();
+        Model model = Model.assembler()
+                .addImport(getClass().getResource("simple-service.smithy"))
+                .addShapes(shape1, shape2)
+                .assemble()
+                .unwrap();
+        TypeScriptSettings settings = TypeScriptSettings.from(model, Node.objectNodeBuilder()
+                .withMember("package", Node.from("example"))
+                .withMember("packageVersion", Node.from("1.0.0"))
+                .build());
+        SymbolProvider provider = new SymbolVisitor(model, settings, 1);
+        Symbol symbol1 = provider.toSymbol(shape1);
+        Symbol symbol2 = provider.toSymbol(shape2);
+        MockManifest manifest = new MockManifest();
+        SymbolVisitor.writeModelIndex(Arrays.asList(shape1, shape2), provider, manifest);
+
+        assertThat(symbol1.getNamespace(), equalTo("./" + CodegenUtils.SOURCE_FOLDER + "/models/models_0"));
+        assertThat(symbol1.getDefinitionFile(), equalTo("./" + CodegenUtils.SOURCE_FOLDER + "/models/models_0.ts"));
+        assertThat(symbol2.getNamespace(), equalTo("./" + CodegenUtils.SOURCE_FOLDER + "/models/models_0"));
+        assertThat(symbol2.getDefinitionFile(), equalTo("./" + CodegenUtils.SOURCE_FOLDER + "/models/models_0.ts"));
+        assertThat(manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "/models/index.ts").get(),
+                containsString("export * from \"./models_0\";"));
+    }
 }

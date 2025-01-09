@@ -1,4 +1,7 @@
-import { booleanSelector, SelectorType } from "./booleanSelector";
+import { beforeEach, describe, expect, test as it } from "vitest";
+
+import { booleanSelector } from "./booleanSelector";
+import { SelectorType } from "./types";
 
 describe(booleanSelector.name, () => {
   const key = "key";

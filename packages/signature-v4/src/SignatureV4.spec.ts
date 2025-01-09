@@ -1,6 +1,7 @@
 import { Sha256 } from "@aws-crypto/sha256-js";
 import { HttpRequest } from "@smithy/protocol-http";
 import { AwsCredentialIdentity, SignableMessage, TimestampHeaderValue } from "@smithy/types";
+import { afterEach, beforeEach, describe, expect, test as it, vi } from "vitest";
 
 import {
   ALGORITHM_IDENTIFIER,
@@ -410,7 +411,7 @@ describe("SignatureV4", () => {
     });
 
     it("should sign requests without host header", async () => {
-      const request = minimalRequest.clone();
+      const request = HttpRequest.clone(minimalRequest);
       delete request.headers[HOST_HEADER];
       const { headers } = await signer.sign(request, {
         signingDate: new Date("2000-01-01T00:00:00.000Z"),
@@ -631,6 +632,13 @@ describe("SignatureV4", () => {
         );
       });
 
+      it("should normalize path with non-standard characters by default", async () => {
+        const { headers } = await signer.sign({ ...minimalRequest, path: "/foo/!'()*" }, signingOptions);
+        expect(headers[AUTH_HEADER]).toEqual(
+          expect.stringContaining("Signature=698b237cc68fe34535e57f374fa81f63219314b5a877742f889f6222c9ecab7b")
+        );
+      });
+
       it("should not URI-encode the path if URI path escaping was disabled on the signer", async () => {
         // Setting `uriEscapePath` to `false` creates an
         // S3-compatible signer. The expected authorization header
@@ -830,12 +838,12 @@ describe("SignatureV4", () => {
     const mockDate = new Date();
 
     beforeEach(() => {
-      dateSpy = jest.spyOn(global, "Date").mockImplementation(() => (mockDate as unknown) as string);
+      dateSpy = vi.spyOn(global, "Date").mockImplementation(() => mockDate as unknown as string);
     });
 
     afterEach(() => {
       expect(dateSpy).toHaveBeenCalledTimes(1);
-      jest.clearAllMocks();
+      vi.clearAllMocks();
     });
 
     it("should use the current date for presigning if no signing date was supplied", async () => {

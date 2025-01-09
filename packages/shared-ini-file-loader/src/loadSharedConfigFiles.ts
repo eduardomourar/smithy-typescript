@@ -1,11 +1,16 @@
-import { SharedConfigFiles } from "@smithy/types";
+import { Logger, SharedConfigFiles } from "@smithy/types";
+import { join } from "path";
 
+import { getConfigData } from "./getConfigData";
 import { getConfigFilepath } from "./getConfigFilepath";
 import { getCredentialsFilepath } from "./getCredentialsFilepath";
-import { getProfileData } from "./getProfileData";
+import { getHomeDir } from "./getHomeDir";
 import { parseIni } from "./parseIni";
 import { slurpFile } from "./slurpFile";
 
+/**
+ * @public
+ */
 export interface SharedConfigInit {
   /**
    * The path at which to locate the ini credentials file. Defaults to the
@@ -26,21 +31,47 @@ export interface SharedConfigInit {
    * property is set, the provider will always reload any configuration files loaded before.
    */
   ignoreCache?: boolean;
+
+  /**
+   * For credential resolution trace logging.
+   */
+  logger?: Logger;
 }
 
 const swallowError = () => ({});
 
+/**
+ * @internal
+ */
+export const CONFIG_PREFIX_SEPARATOR = ".";
+
+/**
+ * Loads the config and credentials files.
+ * @internal
+ */
 export const loadSharedConfigFiles = async (init: SharedConfigInit = {}): Promise<SharedConfigFiles> => {
   const { filepath = getCredentialsFilepath(), configFilepath = getConfigFilepath() } = init;
+  const homeDir = getHomeDir();
+  const relativeHomeDirPrefix = "~/";
+
+  let resolvedFilepath = filepath;
+  if (filepath.startsWith(relativeHomeDirPrefix)) {
+    resolvedFilepath = join(homeDir, filepath.slice(2));
+  }
+
+  let resolvedConfigFilepath = configFilepath;
+  if (configFilepath.startsWith(relativeHomeDirPrefix)) {
+    resolvedConfigFilepath = join(homeDir, configFilepath.slice(2));
+  }
 
   const parsedFiles = await Promise.all([
-    slurpFile(configFilepath, {
+    slurpFile(resolvedConfigFilepath, {
       ignoreCache: init.ignoreCache,
     })
       .then(parseIni)
-      .then(getProfileData)
+      .then(getConfigData)
       .catch(swallowError),
-    slurpFile(filepath, {
+    slurpFile(resolvedFilepath, {
       ignoreCache: init.ignoreCache,
     })
       .then(parseIni)

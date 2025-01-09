@@ -47,13 +47,14 @@ import software.amazon.smithy.typescript.codegen.CodegenUtils;
 import software.amazon.smithy.typescript.codegen.TypeScriptDependency;
 import software.amazon.smithy.typescript.codegen.TypeScriptWriter;
 import software.amazon.smithy.typescript.codegen.integration.ProtocolGenerator.GenerationContext;
-import software.amazon.smithy.utils.IoUtils;
+import software.amazon.smithy.utils.SmithyInternalApi;
 import software.amazon.smithy.utils.SmithyUnstableApi;
 
 /**
  * Utility methods for generating HTTP protocols.
  */
 @SmithyUnstableApi
+@SmithyInternalApi
 public final class HttpProtocolGeneratorUtils {
 
     private static final Logger LOGGER = Logger.getLogger(HttpBindingProtocolGenerator.class.getName());
@@ -79,16 +80,23 @@ public final class HttpProtocolGeneratorUtils {
     ) {
         switch (format) {
             case DATE_TIME:
-                // Use the split to not serialize milliseconds.
-                return "(" + dataSource + ".toISOString().split('.')[0]+\"Z\")";
+                context.getWriter().addImport(
+                    "serializeDateTime",
+                    "__serializeDateTime",
+                    TypeScriptDependency.AWS_SMITHY_CLIENT
+                );
+                return "__serializeDateTime(" + dataSource + ")";
             case EPOCH_SECONDS:
-                return "Math.round(" + dataSource + ".getTime() / 1000)";
+                return "(" + dataSource + ".getTime() / 1_000)";
             case HTTP_DATE:
-                context.getWriter().addImport("dateToUtcString", "__dateToUtcString",
-                    TypeScriptDependency.AWS_SMITHY_CLIENT);
+                context.getWriter().addImport(
+                    "dateToUtcString",
+                    "__dateToUtcString",
+                    TypeScriptDependency.AWS_SMITHY_CLIENT
+                );
                 return "__dateToUtcString(" + dataSource + ")";
             default:
-                throw new CodegenException("Unexpected timestamp format `" + format.toString() + "` on " + shape);
+                throw new CodegenException("Unexpected timestamp format `" + format + "` on " + shape);
         }
     }
 
@@ -160,7 +168,7 @@ public final class HttpProtocolGeneratorUtils {
      *   ({@code input.foo}, {@code entry}, etc.)
      * @return Returns a value or expression of the input string.
      */
-    static String getStringInputParam(GenerationContext context, Shape shape, String dataSource) {
+    public static String getStringInputParam(GenerationContext context, Shape shape, String dataSource) {
         // Handle media type generation, defaulting to the dataSource.
         Optional<MediaTypeTrait> mediaTypeTrait = shape.getTrait(MediaTypeTrait.class);
         if (mediaTypeTrait.isPresent()) {
@@ -168,7 +176,7 @@ public final class HttpProtocolGeneratorUtils {
             if (CodegenUtils.isJsonMediaType(mediaType)) {
                 TypeScriptWriter writer = context.getWriter();
                 writer.addImport("LazyJsonString", "__LazyJsonString", TypeScriptDependency.AWS_SMITHY_CLIENT);
-                return "__LazyJsonString.fromObject(" + dataSource + ")";
+                return "__LazyJsonString.from(" + dataSource + ")";
             } else {
                 LOGGER.warning(() -> "Found unsupported mediatype " + mediaType + " on String shape: " + shape);
             }
@@ -191,7 +199,10 @@ public final class HttpProtocolGeneratorUtils {
      *   only be false if the value is guaranteed to be a string already.
      * @return Returns a value or expression of the output string.
      */
-    static String getStringOutputParam(GenerationContext context, Shape shape, String dataSource, boolean useExpect) {
+    public static String getStringOutputParam(GenerationContext context,
+                                              Shape shape,
+                                              String dataSource,
+                                              boolean useExpect) {
         // Handle media type generation, defaulting to a standard String.
         Optional<MediaTypeTrait> mediaTypeTrait = shape.getTrait(MediaTypeTrait.class);
         if (mediaTypeTrait.isPresent()) {
@@ -199,7 +210,7 @@ public final class HttpProtocolGeneratorUtils {
             if (CodegenUtils.isJsonMediaType(mediaType)) {
                 TypeScriptWriter writer = context.getWriter();
                 writer.addImport("LazyJsonString", "__LazyJsonString", TypeScriptDependency.AWS_SMITHY_CLIENT);
-                return "new __LazyJsonString(" + dataSource + ")";
+                return "__LazyJsonString.from(" + dataSource + ")";
             } else {
                 LOGGER.warning(() -> "Found unsupported mediatype " + mediaType + " on String shape: " + shape);
             }
@@ -224,7 +235,7 @@ public final class HttpProtocolGeneratorUtils {
      *   ({@code output.foo}, {@code entry}, etc.)
      * @return Returns a value or expression of the output string.
      */
-    static String getStringOutputParam(GenerationContext context, Shape shape, String dataSource) {
+    public static String getStringOutputParam(GenerationContext context, Shape shape, String dataSource) {
         return getStringOutputParam(context, shape, dataSource, true);
     }
 
@@ -235,7 +246,7 @@ public final class HttpProtocolGeneratorUtils {
      * @param context The generation context.
      * @param responseType The response type for the HTTP protocol.
      */
-    static void generateMetadataDeserializer(GenerationContext context, SymbolReference responseType) {
+    public static void generateMetadataDeserializer(GenerationContext context, SymbolReference responseType) {
         TypeScriptWriter writer = context.getWriter();
 
         writer.addImport("ResponseMetadata", "__ResponseMetadata", TypeScriptDependency.SMITHY_TYPES);
@@ -257,7 +268,7 @@ public final class HttpProtocolGeneratorUtils {
      *
      * @param context The generation context
      */
-    static void generateCollectBodyString(GenerationContext context) {
+    public static void generateCollectBodyString(GenerationContext context) {
         TypeScriptWriter writer = context.getWriter();
         writer.addImport("collectBody", null, TypeScriptDependency.AWS_SMITHY_CLIENT);
         writer.addImport("SerdeContext", "__SerdeContext", TypeScriptDependency.SMITHY_TYPES);
@@ -265,16 +276,6 @@ public final class HttpProtocolGeneratorUtils {
         writer.write("const collectBodyString = (streamBody: any, context: __SerdeContext): Promise<string> => "
                 + "collectBody(streamBody, context).then(body => context.utf8Encoder(body))");
         writer.write("");
-    }
-
-    /**
-     * Writes any additional utils needed for HTTP protocols with bindings.
-     *
-     * @param context The generation context.
-     */
-    static void generateHttpBindingUtils(GenerationContext context) {
-        TypeScriptWriter writer = context.getWriter();
-        writer.write(IoUtils.readUtf8Resource(HttpProtocolGeneratorUtils.class, "http-binding-utils.ts"));
     }
 
     /**
@@ -298,12 +299,11 @@ public final class HttpProtocolGeneratorUtils {
 
     /**
      * Writes a function used to dispatch to the proper error deserializer
-     * for each error that the operation can return. The generated function
+     * for each error that any operation can return. The generated function
      * assumes a deserialization function is generated for the structures
      * returned.
      *
      * @param context The generation context.
-     * @param operation The operation to generate for.
      * @param responseType The response type for the HTTP protocol.
      * @param errorCodeGenerator A consumer
      * @param shouldParseErrorBody Flag indicating whether need to parse response body in this dispatcher function
@@ -311,38 +311,37 @@ public final class HttpProtocolGeneratorUtils {
      * @param operationErrorsToShapes A map of error names to their {@link ShapeId}.
      * @return A set of all error structure shapes for the operation that were dispatched to.
      */
-    static Set<StructureShape> generateErrorDispatcher(
-            GenerationContext context,
-            OperationShape operation,
-            SymbolReference responseType,
-            Consumer<GenerationContext> errorCodeGenerator,
-            boolean shouldParseErrorBody,
-            BiFunction<GenerationContext, String, String> bodyErrorLocationModifier,
-            BiFunction<GenerationContext, OperationShape, Map<String, ShapeId>> operationErrorsToShapes
+    public static Set<StructureShape> generateUnifiedErrorDispatcher(
+        GenerationContext context,
+        List<OperationShape> operations,
+        SymbolReference responseType,
+        Consumer<GenerationContext> errorCodeGenerator,
+        boolean shouldParseErrorBody,
+        BiFunction<GenerationContext, String, String> bodyErrorLocationModifier,
+        BiFunction<GenerationContext, List<OperationShape>, Map<String, ShapeId>> operationErrorsToShapes
     ) {
         TypeScriptWriter writer = context.getWriter();
         SymbolProvider symbolProvider = context.getSymbolProvider();
         Set<StructureShape> errorShapes = new TreeSet<>();
 
-        Symbol symbol = symbolProvider.toSymbol(operation);
-        Symbol outputType = symbol.expectProperty("outputType", Symbol.class);
-        String errorMethodName = ProtocolGenerator.getDeserFunctionShortName(symbol) + "Error";
-        String errorMethodLongName = ProtocolGenerator.getDeserFunctionName(symbol, context.getProtocolName())
-                + "Error";
+        String errorMethodName = "de_CommandError";
+        String errorMethodLongName = "deserialize_"
+            + ProtocolGenerator.getSanitizedName(context.getProtocolName())
+            + "CommandError";
 
         writer.writeDocs(errorMethodLongName);
-                writer.openBlock("const $L = async(\n"
-                               + "  output: $T,\n"
-                               + "  context: __SerdeContext,\n"
-                               + "): Promise<$T> => {", "}", errorMethodName, responseType, outputType, () -> {
+        writer.openBlock("const $L = async(\n"
+            + "  output: $T,\n"
+            + "  context: __SerdeContext,\n"
+            + "): Promise<never> => {", "}", errorMethodName, responseType, () -> {
             // Prepare error response for parsing error code. If error code needs to be parsed from response body
             // then we collect body and parse it to JS object, otherwise leave the response body as is.
             if (shouldParseErrorBody) {
                 writer.openBlock("const parsedOutput: any = {", "};",
-                        () -> {
-                            writer.write("...output,");
-                            writer.write("body: await parseErrorBody(output.body, context)");
-                        });
+                    () -> {
+                        writer.write("...output,");
+                        writer.write("body: await parseErrorBody(output.body, context)");
+                    });
             }
 
             // Error responses must be at least BaseException interface
@@ -359,7 +358,7 @@ public final class HttpProtocolGeneratorUtils {
 
                 // Get the protocol specific error location for retrieving contents.
                 String errorLocation = bodyErrorLocationModifier.apply(context, "parsedBody");
-                writer.openBlock("return throwDefaultError({", "})", () -> {
+                writer.openBlock("return throwDefaultError({", "}) as never", () -> {
                     writer.write("output,");
                     if (errorLocation.equals("parsedBody")) {
                         writer.write("parsedBody,");
@@ -370,7 +369,8 @@ public final class HttpProtocolGeneratorUtils {
                 });
             };
 
-            Map<String, ShapeId> operationNamesToShapes = operationErrorsToShapes.apply(context, operation);
+            Map<String, ShapeId> operationNamesToShapes = operationErrorsToShapes.apply(context, operations);
+
             if (!operationNamesToShapes.isEmpty()) {
                 writer.openBlock("switch (errorCode) {", "}", () -> {
                     // Generate the case statement for each error, invoking the specific deserializer.
@@ -410,7 +410,7 @@ public final class HttpProtocolGeneratorUtils {
      * @param context The generation context.
      * @param operation The operation to generate for.
      */
-    static void writeHostPrefix(GenerationContext context, OperationShape operation) {
+    public static void writeHostPrefix(GenerationContext context, OperationShape operation) {
         TypeScriptWriter writer = context.getWriter();
         SymbolProvider symbolProvider = context.getSymbolProvider();
         EndpointTrait trait = operation.getTrait(EndpointTrait.class).get();

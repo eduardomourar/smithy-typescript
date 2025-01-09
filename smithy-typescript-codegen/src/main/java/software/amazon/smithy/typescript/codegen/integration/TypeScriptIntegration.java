@@ -29,6 +29,8 @@ import software.amazon.smithy.typescript.codegen.LanguageTarget;
 import software.amazon.smithy.typescript.codegen.TypeScriptCodegenContext;
 import software.amazon.smithy.typescript.codegen.TypeScriptSettings;
 import software.amazon.smithy.typescript.codegen.TypeScriptWriter;
+import software.amazon.smithy.typescript.codegen.extensions.ExtensionConfigurationInterface;
+import software.amazon.smithy.utils.SmithyInternalApi;
 import software.amazon.smithy.utils.SmithyUnstableApi;
 
 /**
@@ -41,12 +43,32 @@ public interface TypeScriptIntegration
         extends SmithyIntegration<TypeScriptSettings, TypeScriptWriter, TypeScriptCodegenContext> {
 
     /**
+     * Filters the integration based on {@link TypeScriptSettings}.
+     *
+     * This is annotated as a Smithy Internal API, and may be removed at any point.
+     *
+     * @param settings settings to filter against
+     * @return whether the integration matches the settings or not.
+     */
+    @SmithyInternalApi
+    default boolean matchesSettings(TypeScriptSettings settings) {
+        return true;
+    }
+
+    /**
      * Gets a list of plugins to apply to the generated client.
      *
      * @return Returns the list of RuntimePlugins to apply to the client.
      */
     default List<RuntimeClientPlugin> getClientPlugins() {
         return Collections.emptyList();
+    }
+
+    /**
+     * Mutates in place the loaded list of plugins to apply to the generated client.
+     */
+    default void mutateClientPlugins(List<RuntimeClientPlugin> plugins) {
+        // defaults to no mutation
     }
 
     /**
@@ -206,5 +228,52 @@ public interface TypeScriptIntegration
             LanguageTarget target
     ) {
          return Collections.emptyMap();
+    }
+
+    /**
+     * Define a list of client configuration interfaces
+     *
+     * A client configuration interface contains settings that modify a service client.
+     * The client configuration interface enables configuring timeouts, retry strategy, etc for the client.
+     *
+     * Multiple interfaces are used to define the client configuration. For example:
+     *
+     * <pre>{@code
+     * interface ChecksumConfig {
+     *   addChecksumAlgorithm(algo: ChecksumAlgorithm): void;
+     *   checksumAlgorithms(): ChecksumAlgorithm[];
+     * }
+     *
+     * interface RetryConfig {
+     *   setRetryStrategy(algo: RetryStrategy): void;
+     *   retryStrategy(): RetryStrategy;
+     * }
+     *
+     * interface ServiceClientConfiguration extends ChecksumConfig, RetryConfig {
+     * }
+     * }</pre>
+     *
+     * During code-generation, smithy-typescript will aggregate the interfaces and create a single client configuration.
+     *
+     * @return list of client configuration interface
+     */
+    default List<ExtensionConfigurationInterface> getExtensionConfigurationInterfaces(
+        Model model,
+        TypeScriptSettings settings
+    ) {
+        return Collections.emptyList();
+    }
+
+    /**
+     * Allows the customization to write arbitrary preparatory code prior to the returned config object.
+     */
+    @SmithyInternalApi
+    default void prepareCustomizations(
+        TypeScriptWriter writer,
+        LanguageTarget target,
+        TypeScriptSettings settings,
+        Model model
+    ) {
+        return;
     }
 }

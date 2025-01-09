@@ -31,6 +31,8 @@ import software.amazon.smithy.utils.SmithyInternalApi;
 final class PackageJsonGenerator {
 
     public static final String PACKAGE_JSON_FILENAME = "package.json";
+    public static final String TYPEDOC_FILE_NAME = "typedoc.json";
+    public static final String VITEST_CONFIG_FILENAME = "vite.config.js";
 
     private PackageJsonGenerator() {}
 
@@ -41,9 +43,19 @@ final class PackageJsonGenerator {
     ) {
         // Write the package.json file.
         InputStream resource = PackageJsonGenerator.class.getResourceAsStream("base-package.json");
-        ObjectNode node = Node.parse(IoUtils.toUtf8String(resource))
-                        .expectObjectNode()
-                        .merge(settings.getPackageJson());
+
+        ObjectNode userSuppliedPackageJson = settings.getPackageJson();
+        ObjectNode defaultPackageJson = Node.parse(IoUtils.toUtf8String(resource))
+            .expectObjectNode();
+
+        ObjectNode mergedScripts = defaultPackageJson.expectObjectMember("scripts")
+            .merge(
+                userSuppliedPackageJson.getObjectMember("scripts")
+                    .orElse(ObjectNode.builder().build())
+            );
+
+        ObjectNode node = defaultPackageJson.merge(userSuppliedPackageJson)
+            .withMember("scripts", mergedScripts);
 
         // Merge TypeScript dependencies into the package.json file.
         for (Map.Entry<String, Map<String, SymbolDependency>> depEntry : dependencies.entrySet()) {
@@ -53,6 +65,43 @@ final class PackageJsonGenerator {
                 builder.withMember(entry.getKey(), entry.getValue().getVersion());
             }
             node = node.withMember(depEntry.getKey(), builder.build());
+        }
+
+        // Add test script and vite.config.js if specs and their devDependency on vitest has been generated.
+        ObjectNode devDeps = node.getObjectMember("devDependencies").orElse(Node.objectNode());
+        if (devDeps.containsMember(TypeScriptDependency.VITEST.packageName)) {
+            ObjectNode scripts = node.getObjectMember("scripts").orElse(Node.objectNode());
+            scripts = scripts.withMember("test", "yarn g:vitest run --passWithNoTests");
+            node = node.withMember("scripts", scripts);
+
+            manifest.writeFile(VITEST_CONFIG_FILENAME, IoUtils.toUtf8String(
+                PackageJsonGenerator.class.getResourceAsStream(VITEST_CONFIG_FILENAME)));
+        }
+
+        if (settings.generateTypeDoc()) {
+            // Add typedoc to the "devDependencies" if not present
+            if (devDeps.getMember(TypeScriptDependency.TYPEDOC.packageName).isEmpty()) {
+                devDeps = devDeps.withMember(
+                    TypeScriptDependency.TYPEDOC.packageName,
+                    TypeScriptDependency.TYPEDOC.version);
+                node = node.withMember("devDependencies", devDeps);
+            }
+
+            // Add @smithy/service-client-documentation-generator to the "devDependencies" if not present
+            if (devDeps.getMember(TypeScriptDependency.AWS_SDK_CLIENT_DOCGEN.packageName).isEmpty()) {
+                devDeps = devDeps.withMember(
+                    TypeScriptDependency.AWS_SDK_CLIENT_DOCGEN.packageName,
+                    TypeScriptDependency.AWS_SDK_CLIENT_DOCGEN.version);
+                node = node.withMember("devDependencies", devDeps);
+            }
+
+            // Add build:docs script
+            ObjectNode scripts = node.getObjectMember("scripts").orElse(Node.objectNode());
+            scripts = scripts.withMember("build:docs", "typedoc");
+            node = node.withMember("scripts", scripts);
+
+            // Write typedoc.json
+            manifest.writeFile(TYPEDOC_FILE_NAME, PackageJsonGenerator.class, TYPEDOC_FILE_NAME);
         }
 
         // These are currently only generated for clients, but they may be needed for ssdk as well.

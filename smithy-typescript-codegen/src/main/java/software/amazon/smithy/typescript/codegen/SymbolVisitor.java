@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -142,8 +143,14 @@ final class SymbolVisitor implements SymbolProvider, ShapeVisitor<Symbol> {
     public Symbol blobShape(BlobShape shape) {
         if (shape.hasTrait(StreamingTrait.class)) {
             // Note: `Readable` needs an import and a dependency.
-            return createSymbolBuilder(shape, "Readable | ReadableStream | Blob", null)
-                    .addReference(Symbol.builder().name("Readable").namespace("stream", "/").build())
+            return createSymbolBuilder(shape, "StreamingBlobTypes", null)
+                    .addReference(
+                        Symbol.builder()
+                            .addDependency(TypeScriptDependency.SMITHY_TYPES)
+                            .name("StreamingBlobTypes")
+                            .namespace("@smithy/types", "/")
+                            .build()
+                    )
                     .build();
         }
 
@@ -186,10 +193,19 @@ final class SymbolVisitor implements SymbolProvider, ShapeVisitor<Symbol> {
      */
     @Override
     public Symbol mapShape(MapShape shape) {
-        Symbol reference = toSymbol(shape.getValue());
-        return createSymbolBuilder(shape, format("Record<string, %s>", reference.getName()), null)
-                .addReference(reference)
-                .build();
+        Symbol key = toSymbol(shape.getKey());
+        Symbol value = toSymbol(shape.getValue());
+
+        boolean stringKey = key.toString().equals("string");
+
+        return createSymbolBuilder(
+            shape,
+            format(stringKey ? "Record<%s, %s>" : "Partial<Record<%s, %s>>", key.getName(), value.getName()),
+        null
+        )
+            .addReference(key)
+            .addReference(value)
+            .build();
     }
 
     @Override
@@ -284,8 +300,12 @@ final class SymbolVisitor implements SymbolProvider, ShapeVisitor<Symbol> {
         if (mediaTypeTrait.isPresent()) {
             String mediaType = mediaTypeTrait.get().getValue();
             if (CodegenUtils.isJsonMediaType(mediaType)) {
-                Symbol.Builder builder = createSymbolBuilder(shape, "__LazyJsonString | string");
-                return addSmithyUseImport(builder, "LazyJsonString", "__LazyJsonString").build();
+                Symbol.Builder builder = createSymbolBuilder(shape, "__AutomaticJsonStringConversion | string");
+                return addSmithyUseImport(
+                    builder,
+                    "AutomaticJsonStringConversion",
+                    "__AutomaticJsonStringConversion"
+                ).build();
             } else {
                 LOGGER.warning(() -> "Found unsupported mediatype " + mediaType + " on String shape: " + shape);
             }
@@ -346,11 +366,7 @@ final class SymbolVisitor implements SymbolProvider, ShapeVisitor<Symbol> {
                 .orElseThrow(() -> new CodegenException("Shape not found: " + shape.getTarget()));
         Symbol targetSymbol = toSymbol(targetShape);
 
-        if (targetShape.isIntEnumShape()) {
-            return createMemberSymbolWithIntEnumTarget(targetSymbol);
-        }
-
-        if (targetSymbol.getProperties().containsKey(EnumTrait.class.getName())) {
+        if (targetSymbol.getProperties().containsKey(EnumTrait.class.getName()) || targetShape.isIntEnumShape()) {
             return createMemberSymbolWithEnumTarget(targetSymbol);
         }
 
@@ -364,24 +380,15 @@ final class SymbolVisitor implements SymbolProvider, ShapeVisitor<Symbol> {
         return targetSymbol;
     }
 
-    // Enums are considered "open", meaning it is a backward compatible change to add new
-    // members. Adding the `string` variant allows for previously generated clients to be
-    // able to handle unknown enum values that may be added in the future.
+    // Enums were considered "open" with the union `| string` or `| number`, meaning it was a backwards
+    // compatible change to add new members. This behavior was later removed to improve the helpfulness
+    // of closed enumerated union types.
+    // For overrides, users should use available type system overrides such as "as any" or
+    // pragma comments.
     private Symbol createMemberSymbolWithEnumTarget(Symbol targetSymbol) {
         return targetSymbol.toBuilder()
                 .namespace(null, "/")
-                .name(targetSymbol.getName() + " | string")
-                .addReference(targetSymbol)
-                .build();
-    }
-
-    // IntEnums are considered "open", meaning it is a backward compatible change to add new
-    // members. Adding the `number` variant allows for previously generated clients to be
-    // able to handle unknown int enum values that may be added in the future.
-    private Symbol createMemberSymbolWithIntEnumTarget(Symbol targetSymbol) {
-        return targetSymbol.toBuilder()
-                .namespace(null, "/")
-                .name(targetSymbol.getName() + " | number")
+                .name(targetSymbol.getName())
                 .addReference(targetSymbol)
                 .build();
     }
@@ -460,9 +467,9 @@ final class SymbolVisitor implements SymbolProvider, ShapeVisitor<Symbol> {
             }
             // Add models into buckets no bigger than chunk size.
             String path;
-            if (shape.getId().equals(UnitTypeTrait.UNIT)) {
-                // Unit should only be put in the zero bucket, since it does not
-                // generate anything. It also does not contribute to bucket size.
+            if (shape.getId().equals(UnitTypeTrait.UNIT) || shape.isResourceShape()) {
+                // Unit or Resource shapes should only be put in the zero bucket, since they do not
+                // generate anything. They also do not contribute to bucket size.
                 path = String.join("/", ".", SHAPE_NAMESPACE_PREFIX, "models_0");
             } else {
                 path = String.join("/", ".", SHAPE_NAMESPACE_PREFIX, "models_" + bucketCount);
@@ -480,13 +487,23 @@ final class SymbolVisitor implements SymbolProvider, ShapeVisitor<Symbol> {
                                     FileManifest fileManifest) {
             TypeScriptWriter writer = new TypeScriptWriter("");
             String modelPrefix = String.join("/", ".", CodegenUtils.SOURCE_FOLDER, SHAPE_NAMESPACE_PREFIX);
-            shapes.stream()
+            List<String> collectedModelNamespaces = shapes.stream()
                     .map(shape -> symbolProvider.toSymbol(shape).getNamespace())
                     .filter(namespace -> namespace.startsWith(modelPrefix))
                     .distinct()
                     .sorted(Comparator.naturalOrder())
                     .map(namespace -> namespace.replaceFirst(Matcher.quoteReplacement(modelPrefix), "."))
-                    .forEach(namespace -> writer.write("export * from $S;", namespace));
+                    .toList();
+
+            // Export empty model index if no models_* files are present
+            if (collectedModelNamespaces.isEmpty()) {
+                writer.write("export {};");
+            } else {
+                for (String namespace : collectedModelNamespaces) {
+                    writer.write("export * from $S;", namespace);
+                }
+            }
+
             fileManifest.writeFile(
                     Paths.get(CodegenUtils.SOURCE_FOLDER, SHAPE_NAMESPACE_PREFIX, "index.ts").toString(),
                     writer.toString());

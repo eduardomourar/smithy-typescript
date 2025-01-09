@@ -1,0 +1,44 @@
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+package software.amazon.smithy.typescript.codegen.auth.http.integration;
+
+import java.util.Optional;
+import software.amazon.smithy.model.Model;
+import software.amazon.smithy.typescript.codegen.TypeScriptSettings;
+import software.amazon.smithy.typescript.codegen.auth.http.HttpAuthScheme;
+import software.amazon.smithy.typescript.codegen.auth.http.SupportedHttpAuthSchemesIndex;
+import software.amazon.smithy.typescript.codegen.integration.TypeScriptIntegration;
+import software.amazon.smithy.utils.SmithyInternalApi;
+
+/**
+ * Java SPI for customizing TypeScript code generation for Identity and Authentication.
+ */
+@SmithyInternalApi
+public interface HttpAuthTypeScriptIntegration extends TypeScriptIntegration {
+    /**
+     * Register an {@link HttpAuthScheme} that is used to generate the {@code HttpAuthSchemeProvider}
+     * and corresponding config field and runtime config values.
+     * @return an empty optional.
+     */
+    default Optional<HttpAuthScheme> getHttpAuthScheme() {
+        return Optional.empty();
+    }
+
+    /**
+     * Mutate an {@link SupportedHttpAuthSchemesIndex} to mutate registered {@link HttpAuthScheme}s,
+     * e.g. default {@code IdentityProvider}s and {@code HttpSigner}s.
+     * @param supportedHttpAuthSchemesIndex index to mutate.
+     * @param model model
+     * @param settings settings
+     */
+    default void customizeSupportedHttpAuthSchemes(
+        SupportedHttpAuthSchemesIndex supportedHttpAuthSchemesIndex,
+        Model model,
+        TypeScriptSettings settings
+    ) {
+        // pass
+    }
+}

@@ -1,7 +1,7 @@
 import { EventStreamMarshaller, EventStreamSerdeProvider } from "@smithy/types";
 
 /**
- * @internal
+ * @public
  */
 export interface EventStreamSerdeInputConfig {}
 
@@ -12,6 +12,9 @@ export interface EventStreamSerdeResolvedConfig {
   eventStreamMarshaller: EventStreamMarshaller;
 }
 
+/**
+ * @internal
+ */
 interface PreviouslyResolved {
   /**
    * Provide the event stream marshaller for the given runtime

@@ -1,10 +1,12 @@
 import { StreamCollector } from "@smithy/types";
 import { fromBase64 } from "@smithy/util-base64";
 
-//reference: https://snack.expo.io/r1JCSWRGU
-export const streamCollector: StreamCollector = (stream: Blob | ReadableStream): Promise<Uint8Array> => {
-  if (typeof Blob === "function" && stream instanceof Blob) {
-    return collectBlob(stream);
+export const streamCollector: StreamCollector = async (stream: Blob | ReadableStream): Promise<Uint8Array> => {
+  if ((typeof Blob === "function" && stream instanceof Blob) || stream.constructor?.name === "Blob") {
+    if (Blob.prototype.arrayBuffer !== undefined) {
+      return new Uint8Array(await (stream as Blob).arrayBuffer());
+    }
+    return collectBlob(stream as Blob);
   }
 
   return collectStream(stream as ReadableStream);
@@ -17,20 +19,28 @@ async function collectBlob(blob: Blob): Promise<Uint8Array> {
 }
 
 async function collectStream(stream: ReadableStream): Promise<Uint8Array> {
-  let res = new Uint8Array(0);
+  const chunks = [];
   const reader = stream.getReader();
   let isDone = false;
+  let length = 0;
+
   while (!isDone) {
     const { done, value } = await reader.read();
     if (value) {
-      const prior = res;
-      res = new Uint8Array(prior.length + value.length);
-      res.set(prior);
-      res.set(value, prior.length);
+      chunks.push(value);
+      length += value.length;
     }
     isDone = done;
   }
-  return res;
+
+  const collected = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    collected.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return collected;
 }
 
 function readToBase64(blob: Blob): Promise<string> {
