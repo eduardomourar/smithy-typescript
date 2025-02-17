@@ -18,6 +18,7 @@ package software.amazon.smithy.typescript.codegen.endpointsV2;
 import java.util.AbstractMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import software.amazon.smithy.model.node.BooleanNode;
 import software.amazon.smithy.model.node.Node;
 import software.amazon.smithy.model.node.ObjectNode;
@@ -30,11 +31,21 @@ public class ParameterGenerator {
     private final String parameterName;
     private final Node param;
     private boolean required = false;
+    private boolean isInputKey;
     private String tsParamType = "string";
 
-    public ParameterGenerator(String key, Node param) {
+    /**
+     * @param key - the param name.
+     * @param param - the param value.
+     * @param isInputKey - whether the key is a client input key. This is
+     *                     distinct from canonical endpoint param name
+     *                     because it has been transformed to match
+     *                     pre-existing keys in published clients.
+     */
+    public ParameterGenerator(String key, Node param, boolean isInputKey) {
         parameterName = key;
         this.param = param;
+        this.isInputKey = isInputKey;
 
         ObjectNode paramNode = param.asObjectNode()
             .orElseThrow(() -> new RuntimeException("param node is not object node."));
@@ -47,15 +58,24 @@ public class ParameterGenerator {
         if (type.isPresent()) {
             switch (type.get().getValue()) {
                 case "String":
+                case "string":
                     tsParamType = "string";
                     break;
                 case "Boolean":
+                case "boolean":
                     tsParamType = "boolean";
+                    break;
+                case "stringArray":
+                    tsParamType = "string[]";
                     break;
                 default:
                     // required by linter
             }
         }
+    }
+
+    public ParameterGenerator(String key, Node param) {
+        this(key, param, false);
     }
 
     public boolean isBuiltIn() {
@@ -86,6 +106,11 @@ public class ParameterGenerator {
             case "boolean":
                 buffer += paramNode.expectBooleanMember("default").getValue() ? "true" : "false";
                 break;
+            case "stringArray":
+                buffer += paramNode.expectArrayMember("default").getElements().stream()
+                    .map(element -> element.expectStringNode().getValue())
+                    .collect(Collectors.joining("`, `", "[`", "`]"));
+                break;
             default:
                 throw new RuntimeException("Unhandled endpoint param type: " + type.getValue());
         }
@@ -112,7 +137,7 @@ public class ParameterGenerator {
         }
         buffer += ": ";
 
-        if (parameterName.equals("endpoint")) {
+        if (parameterName.equals("endpoint") && isInputKey) {
             buffer += "string | Provider<string> | Endpoint | Provider<Endpoint> | EndpointV2 | Provider<EndpointV2>;";
         } else {
             if (isClientContextParam) {

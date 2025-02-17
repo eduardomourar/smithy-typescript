@@ -1,7 +1,10 @@
-import { AuthScheme, HttpAuthDefinition } from "./auth";
-import { EndpointV2 } from "./endpoint";
-import { Logger } from "./logger";
-import { UserAgent } from "./util";
+import type { AuthScheme, HttpAuthDefinition } from "./auth/auth";
+import type { SelectedHttpAuthScheme } from "./auth/HttpAuthScheme";
+import type { Command } from "./command";
+import type { EndpointV2 } from "./endpoint";
+import type { SmithyFeatures } from "./feature-ids";
+import type { Logger } from "./logger";
+import type { UserAgent } from "./util";
 
 /**
  * @public
@@ -284,6 +287,14 @@ export interface HandlerOptions {
   name?: string;
 
   /**
+   * @internal
+   * Aliases allows for middleware to be found by multiple names besides {@link HandlerOptions.name}.
+   * This allows for references to replaced middleware to continue working, e.g. replacing
+   * multiple auth-specific middleware with a single generic auth middleware.
+   */
+  aliases?: Array<string>;
+
+  /**
    * A flag to override the existing middleware with the same name. Without
    * setting it, adding middleware with duplicated name will throw an exception.
    * @internal
@@ -466,6 +477,18 @@ export interface MiddlewareStack<Input extends object, Output extends object> ex
   identify(): string[];
 
   /**
+   * @internal
+   *
+   * When an operation is called using this stack,
+   * it will log its list of middleware to the console using
+   * the identify function.
+   *
+   * @param toggle - set whether to log on resolve.
+   *                 If no argument given, returns the current value.
+   */
+  identifyOnResolve(toggle?: boolean): boolean;
+
+  /**
    * Builds a single handler function from zero or more middleware classes and
    * a core handler. The core handler is meant to send command objects to AWS
    * services and return promises that will resolve with the operation result
@@ -482,6 +505,11 @@ export interface MiddlewareStack<Input extends object, Output extends object> ex
 }
 
 /**
+ * @internal
+ */
+export const SMITHY_CONTEXT_KEY = "__smithy_context";
+
+/**
  * @public
  *
  * Data and helper objects that are not expected to change from one execution of
@@ -493,6 +521,16 @@ export interface HandlerExecutionContext {
    * operation.
    */
   logger?: Logger;
+
+  /**
+   * Name of the service the operation is being sent to.
+   */
+  clientName?: string;
+
+  /**
+   * Name of the operation being executed.
+   */
+  commandName?: string;
 
   /**
    * Additional user agent that inferred by middleware. It can be used to save
@@ -519,6 +557,7 @@ export interface HandlerExecutionContext {
   currentAuthConfig?: HttpAuthDefinition;
 
   /**
+   * @deprecated do not extend this field, it is a carryover from AWS SDKs.
    * Used by DynamoDbDocumentClient.
    */
   dynamoDbDocumentClientOptions?: Partial<{
@@ -526,6 +565,32 @@ export interface HandlerExecutionContext {
     overrideOutputFilterSensitiveLog(...args: any[]): string | void;
   }>;
 
+  /**
+   * @internal
+   * Context for Smithy properties.
+   */
+  [SMITHY_CONTEXT_KEY]?: {
+    service?: string;
+    operation?: string;
+    commandInstance?: Command<any, any, any, any, any>;
+    selectedHttpAuthScheme?: SelectedHttpAuthScheme;
+    features?: SmithyFeatures;
+    /**
+     * @deprecated
+     * Do not assign arbitrary members to the Smithy Context,
+     * fields should be explicitly declared here to avoid collisions.
+     */
+    [key: string]: unknown;
+  };
+
+  /**
+   * @deprecated
+   * Do not assign arbitrary members to the context, since
+   * they can interfere with existing functionality.
+   *
+   * Additional members should instead be declared on the SMITHY_CONTEXT_KEY
+   * or other reserved keys.
+   */
   [key: string]: any;
 }
 

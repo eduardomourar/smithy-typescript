@@ -20,6 +20,7 @@ import java.util.function.BiFunction;
 import java.util.function.UnaryOperator;
 import software.amazon.smithy.codegen.core.CodegenException;
 import software.amazon.smithy.codegen.core.Symbol;
+import software.amazon.smithy.codegen.core.SymbolDependency;
 import software.amazon.smithy.codegen.core.SymbolReference;
 import software.amazon.smithy.codegen.core.SymbolWriter;
 import software.amazon.smithy.model.Model;
@@ -29,6 +30,7 @@ import software.amazon.smithy.model.shapes.Shape;
 import software.amazon.smithy.model.traits.DeprecatedTrait;
 import software.amazon.smithy.model.traits.DocumentationTrait;
 import software.amazon.smithy.model.traits.InternalTrait;
+import software.amazon.smithy.typescript.codegen.validation.ImportFrom;
 import software.amazon.smithy.utils.SmithyUnstableApi;
 import software.amazon.smithy.utils.StringUtils;
 
@@ -104,29 +106,62 @@ public final class TypeScriptWriter extends SymbolWriter<TypeScriptWriter, Impor
     /**
      * Imports a type using an alias from a module only if necessary.
      *
-     * @deprecated Use {@link TypeScriptWriter#addImport(String, String, TypeScriptDependency)} addImport}
-     *
      * @param name Type to import.
      * @param as Alias to refer to the type as.
      * @param from Module to import the type from.
+     *
      * @return Returns the writer.
+     *
+     * @deprecated Use {@link TypeScriptWriter#addImport(String, String, TypeScriptDependency)} addImport}
      */
     @Deprecated
     public TypeScriptWriter addImport(String name, String as, String from) {
+        ImportFrom importFrom = new ImportFrom(from);
+
+        if (importFrom.isDeclarablePackageImport()) {
+            String packageName = importFrom.getPackageName();
+            if (getDependencies()
+                .stream()
+                .map(SymbolDependency::getPackageName)
+                .noneMatch(packageName::equals)) {
+                throw new CodegenException(
+                    """
+                    The import %s does not correspond to a registered dependency.
+                    TypeScriptWriter::addDependency() is required before ::addImport().
+                    """.formatted(from)
+                );
+            }
+        }
+
         getImportContainer().addImport(name, as, from);
         return this;
     }
 
     /**
      * Imports a type using an alias from a module only if necessary.
+     * Adds the dependency.
      *
      * @param name Type to import.
      * @param as Alias to refer to the type as.
-     * @param from TypeScriptDependency to import the type from.
+     * @param from PackageContainer to import the type from.
      * @return Returns the writer.
      */
-    public TypeScriptWriter addImport(String name, String as, TypeScriptDependency from) {
-        return this.addImport(name, as, from.packageName);
+    public TypeScriptWriter addImport(String name, String as, PackageContainer from) {
+        if (from instanceof Dependency) {
+            addDependency((Dependency) from);
+        }
+        return this.addImport(name, as, from.getPackageName());
+    }
+
+    /**
+     * Same as {@link #addImport(String, String, PackageContainer)} but appends a
+     * submodule path, for example "@smithy/core/cbor".
+     */
+    public TypeScriptWriter addImportSubmodule(String name, String as, PackageContainer from, String submodule) {
+        if (from instanceof Dependency dependency) {
+            addDependency(dependency);
+        }
+        return this.addImport(name, as, from.getPackageName() + submodule);
     }
 
     /**
@@ -147,7 +182,7 @@ public final class TypeScriptWriter extends SymbolWriter<TypeScriptWriter, Impor
      * @param runnable Runnable that handles actually writing docs with the writer.
      * @return Returns the writer.
      */
-    TypeScriptWriter writeDocs(Runnable runnable) {
+    public TypeScriptWriter writeDocs(Runnable runnable) {
         pushState("docs");
         write("/**");
         setNewlinePrefix(" * ");
@@ -187,11 +222,16 @@ public final class TypeScriptWriter extends SymbolWriter<TypeScriptWriter, Impor
                     // Escape valid '{' and '}'
                     docs = docs.replace("{", "\\{")
                         .replace("}", "\\}");
-                    docs = preprocessor.apply(docs);
                     if (shape.getTrait(DeprecatedTrait.class).isPresent()) {
-                        docs = "@deprecated\n\n" + docs;
+                        DeprecatedTrait deprecatedTrait = shape.expectTrait(DeprecatedTrait.class);
+                        String deprecationMessage = deprecatedTrait.getMessage()
+                            .map(msg -> " " + msg)
+                            .orElse("");
+                        String deprecationString = "@deprecated" + deprecationMessage;
+                        docs = docs + "\n\n" + deprecationString;
                     }
-                    docs = writeReleaseTag(shape, docs);
+                    docs = preprocessor.apply(docs);
+                    docs = addReleaseTag(shape, docs);
                     writeDocs(docs);
                     return true;
                 }).orElse(false);
@@ -226,9 +266,9 @@ public final class TypeScriptWriter extends SymbolWriter<TypeScriptWriter, Impor
                     docs = docs.replace("{", "\\{")
                         .replace("}", "\\}");
                     if (member.getTrait(DeprecatedTrait.class).isPresent() || isTargetDeprecated(model, member)) {
-                        docs = "@deprecated\n\n" + docs;
+                        docs = docs + "\n\n@deprecated";
                     }
-                    writeReleaseTag(member, docs);
+                    docs = addReleaseTag(member, docs);
                     writeDocs(docs);
                     return true;
                 }).orElse(false);
@@ -240,11 +280,11 @@ public final class TypeScriptWriter extends SymbolWriter<TypeScriptWriter, Impor
                && !Prelude.isPreludeShape(member.getTarget());
     }
 
-    private String writeReleaseTag(Shape shape, String docs) {
+    private String addReleaseTag(Shape shape, String docs) {
         if (shape.getTrait(InternalTrait.class).isPresent()) {
-            docs = "@internal\n" + docs;
+            docs = docs + "\n@internal";
         } else {
-            docs = "@public\n" + docs;
+            docs = docs + "\n@public";
         }
         return docs;
     }

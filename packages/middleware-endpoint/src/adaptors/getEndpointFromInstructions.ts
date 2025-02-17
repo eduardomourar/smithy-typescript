@@ -4,6 +4,8 @@ import { EndpointResolvedConfig } from "../resolveEndpointConfig";
 import { resolveParamsForS3 } from "../service-customizations";
 import { EndpointParameterInstructions } from "../types";
 import { createConfigValueProvider } from "./createConfigValueProvider";
+import { getEndpointFromConfig } from "./getEndpointFromConfig";
+import { toEndpointV1 } from "./toEndpointV1";
 
 /**
  * @internal
@@ -29,13 +31,30 @@ export type EndpointParameterInstructionsSupplier = Partial<{
 export const getEndpointFromInstructions = async <
   T extends EndpointParameters,
   CommandInput extends Record<string, unknown>,
-  Config extends Record<string, unknown>
+  Config extends Record<string, unknown>,
 >(
   commandInput: CommandInput,
   instructionsSupplier: EndpointParameterInstructionsSupplier,
   clientConfig: Partial<EndpointResolvedConfig<T>> & Config,
   context?: HandlerExecutionContext
 ): Promise<EndpointV2> => {
+  if (!clientConfig.endpoint) {
+    let endpointFromConfig: string | undefined;
+
+    // This field is guaranteed by the type indicated by the config resolver, but is new
+    // and some existing standalone calls to this function may not provide the function, so
+    // this check should remain here.
+    if (clientConfig.serviceConfiguredEndpoint) {
+      endpointFromConfig = await clientConfig.serviceConfiguredEndpoint();
+    } else {
+      endpointFromConfig = await getEndpointFromConfig(clientConfig.serviceId);
+    }
+
+    if (endpointFromConfig) {
+      clientConfig.endpoint = () => Promise.resolve(toEndpointV1(endpointFromConfig!));
+    }
+  }
+
   const endpointParams = await resolveParams(commandInput, instructionsSupplier, clientConfig);
 
   if (typeof clientConfig.endpointProvider !== "function") {
@@ -52,7 +71,7 @@ export const getEndpointFromInstructions = async <
 export const resolveParams = async <
   T extends EndpointParameters,
   CommandInput extends Record<string, unknown>,
-  Config extends Record<string, unknown>
+  Config extends Record<string, unknown>,
 >(
   commandInput: CommandInput,
   instructionsSupplier: EndpointParameterInstructionsSupplier,
@@ -72,6 +91,9 @@ export const resolveParams = async <
       case "clientContextParams":
       case "builtInParams":
         endpointParams[name] = await createConfigValueProvider<Config>(instruction.name, name, clientConfig)();
+        break;
+      case "operationContextParams":
+        endpointParams[name] = instruction.get(commandInput);
         break;
       default:
         throw new Error("Unrecognized endpoint parameter instruction: " + JSON.stringify(instruction));

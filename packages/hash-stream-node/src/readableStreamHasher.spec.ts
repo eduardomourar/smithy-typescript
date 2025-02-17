@@ -1,25 +1,30 @@
 import { Hash } from "@smithy/types";
 import { Readable, Writable } from "stream";
+import { afterEach, beforeEach, describe, expect, test as it, vi } from "vitest";
 
 import { HashCalculator } from "./HashCalculator";
 import { readableStreamHasher } from "./readableStreamHasher";
 
-jest.mock("./HashCalculator");
+vi.mock("./HashCalculator");
 
 describe(readableStreamHasher.name, () => {
-  const mockDigest = jest.fn();
-  const mockHashCtor = jest.fn().mockImplementation(() => ({
-    update: jest.fn(),
+  const mockDigest = vi.fn();
+  const mockHashCtor = vi.fn().mockImplementation(() => ({
+    update: vi.fn(),
     digest: mockDigest,
   }));
 
-  const mockHashCalculatorWrite = jest.fn();
-  const mockHashCalculatorEnd = jest.fn();
+  const mockHashCalculatorWrite = vi.fn();
+  const mockHashCalculatorEnd = vi.fn();
 
   const mockHash = new Uint8Array(Buffer.from("mockHash"));
 
   class MockHashCalculator extends Writable {
-    constructor(public readonly hash: Hash, public readonly mockWrite, public readonly mockEnd) {
+    constructor(
+      public readonly hash: Hash,
+      public readonly mockWrite,
+      public readonly mockEnd
+    ) {
       super();
     }
 
@@ -35,18 +40,18 @@ describe(readableStreamHasher.name, () => {
   }
 
   beforeEach(() => {
-    ((HashCalculator as unknown) as jest.Mock).mockImplementation(
+    (HashCalculator as unknown as any).mockImplementation(
       (hash) => new MockHashCalculator(hash, mockHashCalculatorWrite, mockHashCalculatorEnd)
     );
     mockDigest.mockResolvedValue(mockHash);
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("computes hash for a readable stream", async () => {
-    const readableStream = new Readable({ read: (size) => {} });
+    const readableStream = new Readable({ read: () => {} });
     const hashPromise = readableStreamHasher(mockHashCtor, readableStream);
 
     // @ts-ignore Property '_readableState' does not exist on type 'Readable'.
@@ -69,7 +74,7 @@ describe(readableStreamHasher.name, () => {
   });
 
   it("throws if readable stream has started reading", async () => {
-    const readableStream = new Readable({ read: (size) => {} });
+    const readableStream = new Readable({ read: () => {} });
     // Simulate readableFlowing to true.
     readableStream.resume();
 
@@ -84,7 +89,7 @@ describe(readableStreamHasher.name, () => {
 
   it("throws error if readable stream throws error", async () => {
     const readableStream = new Readable({
-      read: (size) => {},
+      read: () => {},
     });
     const hashPromise = readableStreamHasher(mockHashCtor, readableStream);
 
@@ -108,10 +113,10 @@ describe(readableStreamHasher.name, () => {
       mockHashCalculatorWrite,
       mockHashCalculatorEnd
     );
-    ((HashCalculator as unknown) as jest.Mock).mockImplementation((hash) => mockHashCalculator);
+    (HashCalculator as unknown as any).mockImplementation(() => mockHashCalculator);
 
     const readableStream = new Readable({
-      read: (size) => {},
+      read: () => {},
     });
     const hashPromise = readableStreamHasher(mockHashCtor, readableStream);
 
@@ -130,7 +135,7 @@ describe(readableStreamHasher.name, () => {
 
   it("throws error if hash.digest() throws error", async () => {
     const readableStream = new Readable({
-      read: (size) => {},
+      read: () => {},
     });
     const hashPromise = readableStreamHasher(mockHashCtor, readableStream);
 

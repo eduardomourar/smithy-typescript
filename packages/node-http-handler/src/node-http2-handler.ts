@@ -9,6 +9,7 @@ import { writeRequestBody } from "./write-request-body";
 
 /**
  * Represents the http2 options that can be passed to a node http2 client.
+ * @public
  */
 export interface NodeHttp2HandlerOptions {
   /**
@@ -41,13 +42,32 @@ export interface NodeHttp2HandlerOptions {
   maxConcurrentStreams?: number;
 }
 
-export class NodeHttp2Handler implements HttpHandler {
+/**
+ * A request handler using the node:http2 package.
+ * @public
+ */
+export class NodeHttp2Handler implements HttpHandler<NodeHttp2HandlerOptions> {
   private config?: NodeHttp2HandlerOptions;
-  private readonly configProvider: Promise<NodeHttp2HandlerOptions>;
+  private configProvider: Promise<NodeHttp2HandlerOptions>;
 
   public readonly metadata = { handlerProtocol: "h2" };
 
   private readonly connectionManager: NodeHttp2ConnectionManager = new NodeHttp2ConnectionManager({});
+
+  /**
+   * @returns the input if it is an HttpHandler of any class,
+   * or instantiates a new instance of this handler.
+   */
+  public static create(
+    instanceOrOptions?: HttpHandler<any> | NodeHttp2HandlerOptions | Provider<NodeHttp2HandlerOptions | void>
+  ) {
+    if (typeof (instanceOrOptions as any)?.handle === "function") {
+      // is already an instance of HttpHandler.
+      return instanceOrOptions as HttpHandler<any>;
+    }
+    // input is ctor options or undefined.
+    return new NodeHttp2Handler(instanceOrOptions as NodeHttp2HandlerOptions);
+  }
 
   constructor(options?: NodeHttp2HandlerOptions | Provider<NodeHttp2HandlerOptions | void>) {
     this.configProvider = new Promise((resolve, reject) => {
@@ -166,12 +186,21 @@ export class NodeHttp2Handler implements HttpHandler {
       }
 
       if (abortSignal) {
-        abortSignal.onabort = () => {
+        const onAbort = () => {
           req.close();
           const abortError = new Error("Request aborted");
           abortError.name = "AbortError";
           rejectWithDestroy(abortError);
         };
+        if (typeof (abortSignal as AbortSignal).addEventListener === "function") {
+          // preferred.
+          const signal = abortSignal as AbortSignal;
+          signal.addEventListener("abort", onAbort, { once: true });
+          req.once("close", () => signal.removeEventListener("abort", onAbort));
+        } else {
+          // backwards compatibility
+          abortSignal.onabort = onAbort;
+        }
       }
 
       // Set up handlers for errors
@@ -202,9 +231,23 @@ export class NodeHttp2Handler implements HttpHandler {
     });
   }
 
+  updateHttpClientConfig(key: keyof NodeHttp2HandlerOptions, value: NodeHttp2HandlerOptions[typeof key]): void {
+    this.config = undefined;
+    this.configProvider = this.configProvider.then((config) => {
+      return {
+        ...config,
+        [key]: value,
+      };
+    });
+  }
+
+  httpHandlerConfigs(): NodeHttp2HandlerOptions {
+    return this.config ?? {};
+  }
+
   /**
    * Destroys a session.
-   * @param session The session to destroy.
+   * @param session - the session to destroy.
    */
   private destroySession(session: ClientHttp2Session): void {
     if (!session.destroyed) {

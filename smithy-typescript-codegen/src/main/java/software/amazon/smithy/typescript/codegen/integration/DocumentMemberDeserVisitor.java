@@ -279,7 +279,7 @@ public class DocumentMemberDeserVisitor implements ShapeVisitor<String> {
     }
 
     @Override
-    public final String unionShape(UnionShape shape) {
+    public String unionShape(UnionShape shape) {
         context.getWriter().addImport("expectUnion", "__expectUnion", TypeScriptDependency.AWS_SMITHY_CLIENT);
         return getDelegateDeserializer(shape, "__expectUnion(" + dataSource + ")");
     }
@@ -293,6 +293,7 @@ public class DocumentMemberDeserVisitor implements ShapeVisitor<String> {
         Symbol symbol = context.getSymbolProvider().toSymbol(shape);
 
         if (serdeElisionEnabled && serdeElisionIndex.mayElide(shape)) {
+            context.getWriter().addImport("_json", null, TypeScriptDependency.AWS_SMITHY_CLIENT);
             return "_json(" + customDataSource + ")";
         }
 

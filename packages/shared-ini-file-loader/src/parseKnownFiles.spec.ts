@@ -1,7 +1,9 @@
+import { afterEach, describe, expect, test as it, vi } from "vitest";
+
 import { loadSharedConfigFiles } from "./loadSharedConfigFiles";
 import { parseKnownFiles } from "./parseKnownFiles";
 
-jest.mock("./loadSharedConfigFiles");
+vi.mock("./loadSharedConfigFiles");
 
 describe(parseKnownFiles.name, () => {
   const mockConfigFile = {
@@ -14,11 +16,11 @@ describe(parseKnownFiles.name, () => {
   };
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("gets parsedFiles from loadSharedConfigFiles", async () => {
-    (loadSharedConfigFiles as jest.Mock).mockReturnValue(
+    vi.mocked(loadSharedConfigFiles).mockReturnValue(
       Promise.resolve({
         configFile: mockConfigFile,
         credentialsFile: mockCredentialsFile,
@@ -29,12 +31,12 @@ describe(parseKnownFiles.name, () => {
 
     expect(loadSharedConfigFiles).toHaveBeenCalledWith(mockInit);
     expect(parsedFiles).toMatchInlineSnapshot(`
-      Object {
-        "profileName1": Object {
+      {
+        "profileName1": {
           "configKey1": "configValue1",
           "credsKey1": "credsValue1",
         },
-        "profileName2": Object {
+        "profileName2": {
           "configKey2": "configValue2",
           "credsKey2": "credsValue2",
         },

@@ -17,6 +17,7 @@ package software.amazon.smithy.typescript.codegen;
 
 import java.nio.file.Paths;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,8 +33,15 @@ import software.amazon.smithy.model.knowledge.TopDownIndex;
 import software.amazon.smithy.model.shapes.OperationShape;
 import software.amazon.smithy.model.shapes.ServiceShape;
 import software.amazon.smithy.rulesengine.traits.EndpointRuleSetTrait;
+import software.amazon.smithy.typescript.codegen.endpointsV2.EndpointsV2Generator;
 import software.amazon.smithy.typescript.codegen.integration.RuntimeClientPlugin;
 import software.amazon.smithy.typescript.codegen.integration.TypeScriptIntegration;
+import software.amazon.smithy.typescript.codegen.sections.ClientBodyExtraCodeSection;
+import software.amazon.smithy.typescript.codegen.sections.ClientConfigCodeSection;
+import software.amazon.smithy.typescript.codegen.sections.ClientConstructorCodeSection;
+import software.amazon.smithy.typescript.codegen.sections.ClientDestroyCodeSection;
+import software.amazon.smithy.typescript.codegen.sections.ClientPropertiesCodeSection;
+import software.amazon.smithy.typescript.codegen.util.ClientWriterConsumer;
 import software.amazon.smithy.utils.OptionalUtils;
 import software.amazon.smithy.utils.SmithyInternalApi;
 
@@ -41,13 +49,7 @@ import software.amazon.smithy.utils.SmithyInternalApi;
  * Generates a bare-bones client and configuration for service using plugins.
  */
 @SmithyInternalApi
-final class ServiceBareBonesClientGenerator implements Runnable {
-
-    static final String CLIENT_CONFIG_SECTION = "client_config";
-    static final String CLIENT_PROPERTIES_SECTION = "client_properties";
-    static final String CLIENT_BODY_EXTRA_SECTION = "client_body_extra";
-    static final String CLIENT_CONSTRUCTOR_SECTION = "client_constructor";
-    static final String CLIENT_DESTROY_SECTION = "client_destroy";
+public final class ServiceBareBonesClientGenerator implements Runnable {
 
     private final TypeScriptSettings settings;
     private final Model model;
@@ -62,13 +64,13 @@ final class ServiceBareBonesClientGenerator implements Runnable {
     private final ApplicationProtocol applicationProtocol;
 
     ServiceBareBonesClientGenerator(
-            TypeScriptSettings settings,
-            Model model,
-            SymbolProvider symbolProvider,
-            TypeScriptWriter writer,
-            List<TypeScriptIntegration> integrations,
-            List<RuntimeClientPlugin> runtimePlugins,
-            ApplicationProtocol applicationProtocol
+        TypeScriptSettings settings,
+        Model model,
+        SymbolProvider symbolProvider,
+        TypeScriptWriter writer,
+        List<TypeScriptIntegration> integrations,
+        List<RuntimeClientPlugin> runtimePlugins,
+        ApplicationProtocol applicationProtocol
     ) {
         this.settings = settings;
         this.model = model;
@@ -87,11 +89,11 @@ final class ServiceBareBonesClientGenerator implements Runnable {
         resolvedConfigType = getResolvedConfigTypeName(symbol);
     }
 
-    static String getConfigTypeName(Symbol symbol) {
+    public static String getConfigTypeName(Symbol symbol) {
         return symbol.getName() + "Config";
     }
 
-    static String getResolvedConfigTypeName(Symbol symbol) {
+    public static String getResolvedConfigTypeName(Symbol symbol) {
         return symbol.getName() + "ResolvedConfig";
     }
 
@@ -113,7 +115,7 @@ final class ServiceBareBonesClientGenerator implements Runnable {
         writeInputOutputTypeUnion("ServiceOutputTypes", writer,
                 operationSymbol -> operationSymbol.getProperty("outputType", Symbol.class), writer -> {
             // Use a MetadataBearer if an operation doesn't define output.
-            writer.addImport("MetadataBearer", "__MetadataBearer", TypeScriptDependency.AWS_SDK_TYPES);
+            writer.addImport("MetadataBearer", "__MetadataBearer", TypeScriptDependency.SMITHY_TYPES);
             writer.write("| __MetadataBearer");
         });
 
@@ -141,7 +143,7 @@ final class ServiceBareBonesClientGenerator implements Runnable {
         writer.write("export type $L = ", typeName);
         writer.indent();
         // If we have less symbols than operations, at least one doesn't have a type, so add the default.
-        if (containedOperations.size() != symbols.size()) {
+        if (containedOperations.size() != symbols.size() || containedOperations.isEmpty()) {
             defaultTypeGenerator.accept(writer);
         }
         for (int i = 0; i < symbols.size(); i++) {
@@ -152,12 +154,22 @@ final class ServiceBareBonesClientGenerator implements Runnable {
     }
 
     private void generateConfig() {
+        writer.addRelativeImport("RuntimeExtensionsConfig", null,
+            Paths.get(".", CodegenUtils.SOURCE_FOLDER, "runtimeExtensions"));
         writer.addImport("SmithyConfiguration", "__SmithyConfiguration", TypeScriptDependency.AWS_SMITHY_CLIENT);
         writer.addImport("SmithyResolvedConfiguration", "__SmithyResolvedConfiguration",
             TypeScriptDependency.AWS_SMITHY_CLIENT);
 
         // Hook for intercepting the client configuration.
-        writer.pushState(CLIENT_CONFIG_SECTION);
+        writer.pushState(ClientConfigCodeSection.builder()
+            .settings(settings)
+            .model(model)
+            .service(service)
+            .symbolProvider(symbolProvider)
+            .integrations(integrations)
+            .runtimeClientPlugins(runtimePlugins)
+            .applicationProtocol(applicationProtocol)
+            .build());
 
         generateClientDefaults();
 
@@ -186,6 +198,8 @@ final class ServiceBareBonesClientGenerator implements Runnable {
                 }
             }
             if (service.hasTrait(EndpointRuleSetTrait.class)) {
+                writer.addImport("ClientInputEndpointParameters", null,
+                    EndpointsV2Generator.ENDPOINT_PARAMETERS_DEPENDENCY);
                 writer.write("& ClientInputEndpointParameters");
             }
             writer.dedent();
@@ -202,6 +216,7 @@ final class ServiceBareBonesClientGenerator implements Runnable {
         writer.write("export type $LType = __SmithyResolvedConfiguration<$T>",
                      resolvedConfigType, applicationProtocol.getOptionsType());
         writer.write("  & Required<ClientDefaults>");
+        writer.write("  & RuntimeExtensionsConfig");
 
         if (!inputTypes.isEmpty()) {
             writer.indent();
@@ -216,6 +231,8 @@ final class ServiceBareBonesClientGenerator implements Runnable {
                         }
                     });
             if (service.hasTrait(EndpointRuleSetTrait.class)) {
+                writer.addImport("ClientResolvedEndpointParameters", null,
+                    EndpointsV2Generator.ENDPOINT_PARAMETERS_DEPENDENCY);
                 writer.write("& ClientResolvedEndpointParameters");
             }
             writer.dedent();
@@ -237,21 +254,20 @@ final class ServiceBareBonesClientGenerator implements Runnable {
 
         writer.writeDocs("@public")
             .openBlock("export interface ClientDefaults\n"
-                         + "  extends Partial<__SmithyResolvedConfiguration<$T>> {", "}",
+                         + "  extends Partial<__SmithyConfiguration<$T>> {", "}",
                 applicationProtocol.getOptionsType(), () -> {
-            writer.addImport("HttpHandler", "__HttpHandler", TypeScriptDependency.PROTOCOL_HTTP);
-            writer.writeDocs("The HTTP handler to use. Fetch in browser and Https in Nodejs.");
-            writer.write("requestHandler?: __HttpHandler;\n");
+            writer.addImport("HttpHandlerUserInput", "__HttpHandlerUserInput", TypeScriptDependency.PROTOCOL_HTTP);
+            writer.writeDocs(
+                "The HTTP handler to use or its constructor options. Fetch in browser and Https in Nodejs."
+            );
+            writer.write("requestHandler?: __HttpHandlerUserInput;\n");
 
-            writer.addImport("Hash", "__Hash", TypeScriptDependency.SMITHY_TYPES);
             writer.addImport("HashConstructor", "__HashConstructor", TypeScriptDependency.SMITHY_TYPES);
-
-            writer.addImport("Checksum", "__Checksum", TypeScriptDependency.SMITHY_TYPES);
             writer.addImport("ChecksumConstructor", "__ChecksumConstructor", TypeScriptDependency.SMITHY_TYPES);
-            writer.writeDocs("A constructor for a class implementing the {@link @smithy/types#ChecksumConstructor} "
-                            + "interface \n"
-                            + "that computes the SHA-256 HMAC or checksum of a string or binary buffer.\n"
-                            + "@internal");
+            writer.writeDocs("""
+                A constructor for a class implementing the {@link @smithy/types#ChecksumConstructor} interface
+                that computes the SHA-256 HMAC or checksum of a string or binary buffer.
+                @internal""");
             writer.write("sha256?: __ChecksumConstructor | __HashConstructor;\n");
 
             writer.addImport("UrlParser", "__UrlParser", TypeScriptDependency.SMITHY_TYPES);
@@ -319,13 +335,28 @@ final class ServiceBareBonesClientGenerator implements Runnable {
             writer.write("");
             generateDestroyMethod();
             // Hook for adding more methods to the client.
-            writer.pushState(CLIENT_BODY_EXTRA_SECTION).popState();
+            writer.injectSection(ClientBodyExtraCodeSection.builder()
+                .settings(settings)
+                .model(model)
+                .service(service)
+                .symbolProvider(symbolProvider)
+                .integrations(integrations)
+                .runtimeClientPlugins(runtimePlugins)
+                .applicationProtocol(applicationProtocol)
+                .build());
         });
     }
 
     private void generateClientProperties() {
         // Hook for adding/changing client properties.
-        writer.pushState(CLIENT_PROPERTIES_SECTION);
+        writer.pushState(ClientPropertiesCodeSection.builder()
+            .settings(settings)
+            .model(model)
+            .service(service)
+            .symbolProvider(symbolProvider)
+            .integrations(integrations)
+            .applicationProtocol(applicationProtocol)
+            .build());
         writer.writeDocs(String.format("The resolved configuration of %s class. This is resolved and normalized from "
                 + "the {@link %s | constructor configuration interface}.", symbol.getName(), configType));
         writer.write("readonly config: $L;\n", resolvedConfigType);
@@ -333,16 +364,24 @@ final class ServiceBareBonesClientGenerator implements Runnable {
     }
 
     private void generateConstructor() {
-        writer.openBlock("constructor(configuration: $L) {", "}", configType, () -> {
+        writer.addImport("CheckOptionalClientConfig", "__CheckOptionalClientConfig",
+            TypeScriptDependency.SMITHY_TYPES);
+        writer.openBlock("constructor(...[configuration]: __CheckOptionalClientConfig<$L>) {", "}", configType, () -> {
             // Hook for adding/changing the client constructor.
-            writer.pushState(CLIENT_CONSTRUCTOR_SECTION);
+            writer.pushState(ClientConstructorCodeSection.builder()
+                .service(service)
+                .runtimeClientPlugins(runtimePlugins)
+                .model(model)
+                .build());
 
             int configVariable = 0;
-            writer.write("let $L = __getRuntimeConfig(configuration);",
+            writer.write("let $L = __getRuntimeConfig(configuration || {});",
                     generateConfigVariable(configVariable));
 
             if (service.hasTrait(EndpointRuleSetTrait.class)) {
                 configVariable++;
+                writer.addImport("resolveClientEndpointParameters", null,
+                    EndpointsV2Generator.ENDPOINT_PARAMETERS_DEPENDENCY);
                 writer.write("let $L = $L($L);",
                     generateConfigVariable(configVariable),
                     "resolveClientEndpointParameters",
@@ -357,20 +396,38 @@ final class ServiceBareBonesClientGenerator implements Runnable {
             for (RuntimeClientPlugin plugin : runtimePlugins) {
                 if (plugin.getResolveFunction().isPresent()) {
                     configVariable++;
+                    // Construct additional parameters string
                     Map<String, Object> paramsMap = plugin.getAdditionalResolveFunctionParameters(
                             model, service, null);
                     List<String> additionalParameters = CodegenUtils.getFunctionParametersList(paramsMap);
-
                     String additionalParamsString = additionalParameters.isEmpty()
                             ? ""
-                            : ", { " + String.join(", ", additionalParameters) + "}";
-                    writer.write("let $L = $T($L$L);",
-                                 generateConfigVariable(configVariable),
-                                 plugin.getResolveFunction().get(),
-                                 generateConfigVariable(configVariable - 1),
-                                 additionalParamsString);
+                            : ", { " + String.join(", ", additionalParameters) + " }";
+
+                    // Construct writer context
+                    Map<String, Object> symbolMap = new HashMap<>();
+                    symbolMap.put("newConfig", generateConfigVariable(configVariable));
+                    symbolMap.put("resolveFn", plugin.getResolveFunction().get());
+                    symbolMap.put("oldConfig", generateConfigVariable(configVariable - 1));
+                    for (Map.Entry<String, Object> entry : paramsMap.entrySet()) {
+                        if (entry.getValue() instanceof Symbol) {
+                            symbolMap.put(entry.getKey(), entry.getValue());
+                        }
+                    }
+                    writer.pushState();
+                    writer.putContext(symbolMap);
+                    writer.write("let $newConfig:L = $resolveFn:T($oldConfig:L" + additionalParamsString + ");");
+                    writer.popState();
                 }
             }
+
+            writer.addRelativeImport("resolveRuntimeExtensions", null,
+                Paths.get(".", CodegenUtils.SOURCE_FOLDER, "runtimeExtensions"));
+
+            configVariable++;
+            writer.write("let $L = resolveRuntimeExtensions($L, configuration?.extensions || []);",
+                generateConfigVariable(configVariable),
+                generateConfigVariable(configVariable - 1));
 
             writer.write("super($L);", generateConfigVariable(configVariable));
             writer.write("this.config = $L;", generateConfigVariable(configVariable));
@@ -378,11 +435,54 @@ final class ServiceBareBonesClientGenerator implements Runnable {
             // Add runtime plugins that contain middleware to the middleware stack
             // of the client.
             for (RuntimeClientPlugin plugin : runtimePlugins) {
-                plugin.getPluginFunction().ifPresent(symbol -> {
-                    writer.write("this.middlewareStack.use($T(this.config));", symbol);
+                plugin.getPluginFunction().ifPresent(pluginSymbol -> {
+                    // Construct additional parameters string
+                    Map<String, Object> paramsMap = plugin.getAdditionalPluginFunctionParameters(
+                            model, service, null);
+
+                    // Construct writer context
+                    Map<String, Object> symbolMap = new HashMap<>();
+                    symbolMap.put("pluginFn", pluginSymbol);
+                    for (Map.Entry<String, Object> entry : paramsMap.entrySet()) {
+                        if (entry.getValue() instanceof Symbol) {
+                            symbolMap.put(entry.getKey(), entry.getValue());
+                        }
+                    }
+                    writer.pushState();
+                    writer.putContext(symbolMap);
+                    writer.openBlock("this.middlewareStack.use($pluginFn:T(this.config", "));", () -> {
+                        List<String> additionalParameters = CodegenUtils.getFunctionParametersList(paramsMap);
+                        Map<String, ClientWriterConsumer> clientAddParamsWriterConsumers =
+                            plugin.getClientAddParamsWriterConsumers();
+
+                        if (additionalParameters.isEmpty() && clientAddParamsWriterConsumers.isEmpty()) {
+                            return;
+                        }
+
+                        writer.openBlock(", {", " }", () -> {
+                            // caution: using String.join instead of templating
+                            // because additionalParameters may contain Smithy syntax.
+                            if (!additionalParameters.isEmpty()) {
+                                writer.writeInline(String.join(", ", additionalParameters) + ", ");
+                            }
+                            clientAddParamsWriterConsumers.forEach((key, consumer) -> {
+                                writer.writeInline("$L: $C,", key, (Consumer<TypeScriptWriter>) (w -> {
+                                    consumer.accept(w, ClientBodyExtraCodeSection.builder()
+                                        .settings(settings)
+                                        .model(model)
+                                        .service(service)
+                                        .symbolProvider(symbolProvider)
+                                        .integrations(integrations)
+                                        .runtimeClientPlugins(runtimePlugins)
+                                        .applicationProtocol(applicationProtocol)
+                                        .build());
+                                }));
+                            });
+                        });
+                    });
+                    writer.popState();
                 });
             }
-
             writer.popState();
         });
     }
@@ -401,7 +501,9 @@ final class ServiceBareBonesClientGenerator implements Runnable {
                     + "them.");
         }
         writer.openBlock("destroy(): void {", "}", () -> {
-            writer.pushState(CLIENT_DESTROY_SECTION);
+            writer.pushState(ClientDestroyCodeSection.builder()
+                .runtimeClientPlugins(runtimePlugins)
+                .build());
             for (RuntimeClientPlugin plugin : runtimePlugins) {
                 plugin.getDestroyFunction().ifPresent(destroy -> {
                     writer.write("$T(this.config);", destroy);

@@ -1,11 +1,12 @@
-import { Client } from "./client";
+import type { Client } from "./client";
+import type { Command } from "./command";
 
 /**
  * @public
  *
  * Expected type definition of a paginator.
  */
-export type Paginator<T> = AsyncGenerator<T, T, unknown>;
+export type Paginator<T> = AsyncGenerator<T, undefined, unknown>;
 
 /**
  * @public
@@ -25,4 +26,10 @@ export interface PaginationConfiguration {
    * instead of when it is not present.
    */
   stopOnSameToken?: boolean;
+  /**
+   * @param command - reference to the instantiated command. This callback is executed
+   *                  prior to sending the command with the paginator's client.
+   * @returns the original command or a replacement, defaulting to the original command object.
+   */
+  withCommand?: (command: Command<any, any, any, any, any>) => typeof command | undefined;
 }

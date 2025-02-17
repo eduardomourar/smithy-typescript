@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { strictParseByte, strictParseDouble, strictParseFloat32, strictParseShort } from "./parse-utils";
 
 // Build indexes outside so we allocate them once.
@@ -217,6 +218,9 @@ export const parseEpochTimestamp = (value: unknown): Date | undefined => {
     valueAsDouble = value;
   } else if (typeof value === "string") {
     valueAsDouble = strictParseDouble(value)!;
+  } else if (typeof value === "object" && (value as { tag: number; value: number }).tag === 1) {
+    // timestamp is a CBOR tag type.
+    valueAsDouble = (value as { tag: number; value: number }).value;
   } else {
     throw new TypeError("Epoch timestamps must be expressed as floating point numbers or their string representation");
   }

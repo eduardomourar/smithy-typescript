@@ -74,7 +74,7 @@ import software.amazon.smithy.utils.Pair;
 import software.amazon.smithy.utils.SmithyInternalApi;
 
 /**
- * Generates HTTP protocol test cases to be run using Jest.
+ * Generates HTTP protocol test cases to be run using Vitest.
  *
  * <p>Protocol tests are defined for HTTP protocols using the
  * {@code smithy.test#httpRequestTests}, {@code smithy.test#httpResponseTests}
@@ -308,7 +308,7 @@ public final class HttpProtocolTestGenerator implements Runnable {
 
             // Create a mock function to set in place of the server operation function so we can capture
             // input and other information.
-            writer.write("const testFunction = jest.fn();");
+            writer.write("const testFunction = vi.fn();");
             writer.write("testFunction.mockReturnValue(Promise.resolve({}));");
 
             boolean usesDefaultValidation = !context.getSettings().isDisableDefaultValidation();
@@ -354,7 +354,7 @@ public final class HttpProtocolTestGenerator implements Runnable {
 
             // Create a mock function to set in place of the server operation function so we can capture
             // input and other information.
-            writer.write("const testFunction = jest.fn();");
+            writer.write("const testFunction = vi.fn();");
             writer.openBlock("testFunction.mockImplementation(() => {", "});", () -> {
                 writer.write("throw new Error($S);", "This request should have been rejected.");
             });
@@ -448,6 +448,7 @@ public final class HttpProtocolTestGenerator implements Runnable {
 
         writeHttpHeaderAssertions(testCase);
         writeHttpQueryAssertions(testCase);
+        writeHttpHostAssertion(testCase);
         testCase.getBody().ifPresent(body -> {
             writeHttpBodyAssertions(body, testCase.getBodyMediaType().orElse("UNKNOWN"), true);
         });
@@ -521,10 +522,20 @@ public final class HttpProtocolTestGenerator implements Runnable {
         writer.write("");
     }
 
+    private void writeHttpHostAssertion(HttpRequestTestCase testCase) {
+        testCase.getResolvedHost().ifPresent(resolvedHost -> {
+            writer.write("expect(r.headers[\"host\"]).toBeDefined();");
+            writer.write("expect(r.headers[\"host\"]).toBe($S);", resolvedHost);
+            writer.write("");
+        });
+    }
+
     private void writeHttpBodyAssertions(String body, String mediaType, boolean isClientTest) {
-        // If we expect an empty body, expect it to be falsy.
         if (body.isEmpty()) {
-            writer.write("expect(r.body).toBeFalsy();");
+            // If we expect an empty body, expect it to be falsy.
+            // Or, for JSON an empty object represents an empty body.
+            // mediaType is often UNKNOWN here.
+            writer.write("expect(!r.body || r.body === `{}`).toBeTruthy();");
             return;
         }
 
@@ -538,11 +549,13 @@ public final class HttpProtocolTestGenerator implements Runnable {
         // because a request case for servers would be comparing parsed objects. We
         // need to know which is which here to be able to grab the utf8Encoder from
         // the right place.
-        if (isClientTest) {
-            writer.write("const utf8Encoder = client.config.utf8Encoder;");
-        } else {
-            writer.addImport("toUtf8", "__utf8Encoder", TypeScriptDependency.AWS_SDK_UTIL_UTF8);
-            writer.write("const utf8Encoder = __utf8Encoder;");
+        if (!mediaType.equals("application/cbor")) {
+            if (isClientTest) {
+                writer.write("const utf8Encoder = client.config.utf8Encoder;");
+            } else {
+                writer.addImport("toUtf8", "__utf8Encoder", TypeScriptDependency.AWS_SDK_UTIL_UTF8);
+                writer.write("const utf8Encoder = __utf8Encoder;");
+            }
         }
 
         // Handle escaping strings with quotes inside them.
@@ -587,6 +600,11 @@ public final class HttpProtocolTestGenerator implements Runnable {
             case "text/plain":
                 additionalStubs.add("protocol-test-text-stub.ts");
                 return "compareEquivalentTextBodies(bodyString, r.body)";
+            case "application/cbor":
+                writer.addImportSubmodule("cbor", null,
+                    TypeScriptDependency.SMITHY_CORE, SmithyCoreSubmodules.CBOR);
+                additionalStubs.add("protocol-test-cbor-stub.ts");
+                return "compareEquivalentCborBodies(bodyString, r.body)";
             default:
                 LOGGER.warning("Unable to compare bodies with unknown media type `" + mediaType
                         + "`, defaulting to direct comparison.");
@@ -801,7 +819,6 @@ public final class HttpProtocolTestGenerator implements Runnable {
         // trick TS in to letting us send this command through.
         writer.write("const params: any = {};");
         writer.write("const command = new $T(params);\n", operationSymbol);
-
     }
 
     // Ensure that the serialized response matches the expected response.
@@ -903,12 +920,14 @@ public final class HttpProtocolTestGenerator implements Runnable {
             writer.write("expect(r[param]).toBeDefined();");
             if (hasStreamingPayloadBlob) {
                 writer.openBlock("if (param === $S) {", "} else {", payloadBinding.get().getMemberName(), () ->
-                        writer.write("expect(equivalentContents(comparableBlob, "
-                                + "paramsToValidate[param])).toBe(true);"));
+                        writer.write("""
+                            expect(equivalentContents(paramsToValidate[param], \
+                            comparableBlob)).toBe(true);
+                            """));
                 writer.indent();
             }
 
-            writer.write("expect(equivalentContents(r[param], paramsToValidate[param])).toBe(true);");
+            writer.write("expect(equivalentContents(paramsToValidate[param], r[param])).toBe(true);");
 
             if (hasStreamingPayloadBlob) {
                 writer.dedent();
@@ -976,7 +995,7 @@ public final class HttpProtocolTestGenerator implements Runnable {
             String closeElement = "]";
 
             // Write the value out directly.
-            writer.openBlock("$L\n", closeElement + ",\n", openElement, () -> {
+            writer.openBlock("$L", closeElement + ",", openElement, () -> {
                 Shape wrapperShape = this.workingShape;
                 node.getElements().forEach(element -> {
                     // Swap the working shape to the member of the collection.
@@ -984,7 +1003,7 @@ public final class HttpProtocolTestGenerator implements Runnable {
                     if (wrapperShape instanceof CollectionShape) {
                         this.workingShape = model.expectShape(((CollectionShape) wrapperShape).getMember().getTarget());
                     }
-                    writer.call(() -> element.accept(this)).write("\n");
+                    writer.call(() -> element.accept(this));
                 });
                 this.workingShape = wrapperShape;
             });
@@ -1034,7 +1053,7 @@ public final class HttpProtocolTestGenerator implements Runnable {
                 suffix += ";";
                 appendSemicolon = false;
             } else {
-                suffix += ",\n";
+                suffix += ",";
             }
 
             writer.openBlock("{", suffix, () -> {
@@ -1066,7 +1085,6 @@ public final class HttpProtocolTestGenerator implements Runnable {
                         this.workingShape = model.expectShape(memberShape.getTarget());
                         writer.call(() -> valueNode.accept(this));
                     }
-                    writer.write("\n");
                 });
                 // Check for setting a potentially unspecified member value for the
                 // idempotency token.
@@ -1197,7 +1215,7 @@ public final class HttpProtocolTestGenerator implements Runnable {
             String closeElement = "]";
 
             // Write the value out directly.
-            writer.openBlock("$L\n", closeElement + ",\n", openElement, () -> {
+            writer.openBlock("$L", closeElement + ",", openElement, () -> {
                 Shape wrapperShape = this.workingShape;
                 node.getElements().forEach(element -> {
                     // Swap the working shape to the member of the collection.
@@ -1205,7 +1223,7 @@ public final class HttpProtocolTestGenerator implements Runnable {
                     if (wrapperShape instanceof CollectionShape) {
                         this.workingShape = model.expectShape(((CollectionShape) wrapperShape).getMember().getTarget());
                     }
-                    writer.call(() -> element.accept(this)).write("\n");
+                    writer.call(() -> element.accept(this));
                 });
                 this.workingShape = wrapperShape;
             });
@@ -1229,9 +1247,9 @@ public final class HttpProtocolTestGenerator implements Runnable {
         @Override
         public Void numberNode(NumberNode node) {
             // Handle timestamps needing to be converted from numbers to their input type of Date.
-            // Also handle that a Date in TS takes milliseconds, so add 000 to the end.
+            // Also handle that a Date in TS takes milliseconds, so add * 1000 to the end.
             if (workingShape.isTimestampShape()) {
-                writer.write("new Date($L000),", node.getValue());
+                writer.write("new Date($L * 1000),", node.getValue());
             } else {
                 writer.write("$L,", node.getValue().toString());
             }
@@ -1248,7 +1266,7 @@ public final class HttpProtocolTestGenerator implements Runnable {
 
             // Both objects and maps can use a majority of the same logic.
             // Use "as any" to have TS complain less about undefined entries.
-            writer.openBlock("{", "},\n", () -> {
+            writer.openBlock("{", "},", () -> {
                 Shape wrapperShape = this.workingShape;
                 node.getMembers().forEach((keyNode, valueNode) -> {
                     // Grab the correct member related to the node member we have.
@@ -1278,7 +1296,6 @@ public final class HttpProtocolTestGenerator implements Runnable {
                             ? downcaseNodeKeys(valueNode.expectObjectNode())
                             : valueNode;
                     writer.call(() -> renderNode.accept(this));
-                    writer.write("\n");
                 });
                 this.workingShape = wrapperShape;
             });

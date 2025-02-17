@@ -31,14 +31,22 @@ export interface StreamCollector {
  *
  * Request and Response serde util functions and settings for AWS services
  */
-export interface SerdeContext extends EndpointBearer {
+export interface SerdeContext extends SerdeFunctions, EndpointBearer {
+  requestHandler: RequestHandler<any, any>;
+  disableHostPrefix: boolean;
+}
+
+/**
+ * @public
+ *
+ * Serde functions from the client config.
+ */
+export interface SerdeFunctions {
   base64Encoder: Encoder;
   base64Decoder: Decoder;
   utf8Encoder: Encoder;
   utf8Decoder: Decoder;
   streamCollector: StreamCollector;
-  requestHandler: RequestHandler<any, any>;
-  disableHostPrefix: boolean;
 }
 
 /**
@@ -73,6 +81,7 @@ export interface ResponseDeserializer<OutputType, ResponseType = any, Context = 
  * The interface contains mix-in utility functions to transfer the runtime-specific
  * stream implementation to specified format. Each stream can ONLY be transformed
  * once.
+ * @public
  */
 export interface SdkStreamMixin {
   transformToByteArray: () => Promise<Uint8Array>;

@@ -24,7 +24,7 @@ wrapper/
 .attach_pid*
 
 # local scripting
-Makefile
+workspace
 
 # Visual Studio Code
 .vscode/*
@@ -36,6 +36,9 @@ smithy-typescript-integ-tests/yarn.lock
 
 # Issue https://github.com/awslabs/smithy-typescript/issues/425
 smithy-typescript-codegen/bin/
+smithy-typescript-codegen-test/bin/
+smithy-typescript-ssdk-codegen-test-utils/bin/
+smithy-typescript-codegen-test/example-weather-customizations/bin/
 
 **/node_modules/
 **/*.tsbuildinfo
@@ -58,3 +61,6 @@ dist-*
 
 # Gradle composite build properties
 local.properties
+
+# doc-gen
+api-extractor-packages

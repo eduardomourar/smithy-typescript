@@ -12,55 +12,66 @@ import software.amazon.smithy.model.node.Node;
 public class CommandGeneratorTest {
     @Test
     public void addsCommandSpecificPlugins() {
-        testCommmandCodegen("output-structure.smithy",
-                "  resolveMiddleware(\n" +
-                "    clientStack: MiddlewareStack<ServiceInputTypes, ServiceOutputTypes>,\n" +
-                "    configuration: ExampleClientResolvedConfig,\n" +
-                "    options?: __HttpHandlerOptions\n" +
-                "  ): Handler<GetFooCommandInput, GetFooCommandOutput> {\n" +
-                "    this.middlewareStack.use(getSerdePlugin(configuration, this.serialize, this.deserialize));\n" +
-                "\n" +
-                "    const stack = clientStack.concat(this.middlewareStack);");
+        testCommmandCodegen(
+            "output-structure.smithy",
+            new String[] {"getSerdePlugin(config, this.serialize, this.deserialize)"}
+        );
     }
 
     @Test
     public void writesSerializer() {
-        testCommmandCodegen("output-structure.smithy",
-                "  private serialize(\n" +
-                "    input: GetFooCommandInput,\n" +
-                "    context: __SerdeContext\n" +
-                "  ): Promise<__HttpRequest> {");
+        testCommmandCodegen(
+            "output-structure.smithy",
+            new String[] {".ser("}
+        );
     }
 
     @Test
     public void writesDeserializer() {
-        testCommmandCodegen("output-structure.smithy",
-                "  private deserialize(\n" +
-                "    output: __HttpResponse,\n" +
-                "    context: __SerdeContext\n" +
-                "  ): Promise<GetFooCommandOutput> {");
+        testCommmandCodegen(
+            "output-structure.smithy",
+            new String[] {".de("}
+        );
     }
 
-    private void testCommmandCodegen(String file, String expectedType) {
-        Model model = Model.assembler()
-                .addImport(getClass().getResource(file))
-                .assemble()
-                .unwrap();
+    @Test
+    public void writesOperationContextParamValues() {
+        testCommmandCodegen(
+            "endpointsV2/endpoints-operation-context-params.smithy",
+            new String[] {
+                "opContextParamIdentifier: { type: \"operationContextParams\", get: (input?: any) => input?.fooString }",
+                "opContextParamSubExpression: { type: \"operationContextParams\", get: (input?: any) => input?.fooObj?.bar }",
+                "opContextParamWildcardExpressionList: { type: \"operationContextParams\", get: (input?: any) => input?.fooList }",
+                "opContextParamWildcardExpressionListObj: { type: \"operationContextParams\", get: (input?: any) => input?.fooListObj?.map((obj: any) => obj?.key) }",
+                "opContextParamWildcardExpressionHash: { type: \"operationContextParams\", get: (input?: any) => Object.values(input?.fooObjObj ?? {}).map((obj: any) => obj?.bar) }",
+                "opContextParamKeys: { type: \"operationContextParams\", get: (input?: any) => Object.keys(input?.fooKeys ?? {}) }",
+            }
+        );
+    }
+
+    private void testCommmandCodegen(String filename, String[] expectedTypeArray) {
         MockManifest manifest = new MockManifest();
         PluginContext context = PluginContext.builder()
-                .model(model)
-                .fileManifest(manifest)
-                .settings(Node.objectNodeBuilder()
-                                  .withMember("service", Node.from("smithy.example#Example"))
-                                  .withMember("package", Node.from("example"))
-                                  .withMember("packageVersion", Node.from("1.0.0"))
-                                  .build())
-                .build();
+            .pluginClassLoader(getClass().getClassLoader())
+            .model(Model.assembler()
+                .addImport(getClass().getResource(filename))
+                .discoverModels()
+                .assemble()
+                .unwrap())
+            .fileManifest(manifest)
+            .settings(Node.objectNodeBuilder()
+                .withMember("service", Node.from("smithy.example#Example"))
+                .withMember("package", Node.from("example"))
+                .withMember("packageVersion", Node.from("1.0.0"))
+                .build())
+            .build();
 
         new TypeScriptCodegenPlugin().execute(context);
         String contents = manifest.getFileString(CodegenUtils.SOURCE_FOLDER + "//commands/GetFooCommand.ts").get();
 
         assertThat(contents, containsString("as __MetadataBearer"));
-        assertThat(contents, containsString(expectedType));
+        for (String expectedType : expectedTypeArray) {
+            assertThat(contents, containsString(expectedType));
+        }
     }
 }

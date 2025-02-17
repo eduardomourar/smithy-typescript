@@ -18,7 +18,7 @@ package software.amazon.smithy.typescript.codegen;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,11 +50,13 @@ import software.amazon.smithy.model.shapes.ShapeId;
 import software.amazon.smithy.model.traits.PaginatedTrait;
 import software.amazon.smithy.model.validation.ValidationEvent;
 import software.amazon.smithy.rulesengine.traits.EndpointRuleSetTrait;
+import software.amazon.smithy.typescript.codegen.auth.http.HttpAuthSchemeProviderGenerator;
 import software.amazon.smithy.typescript.codegen.endpointsV2.EndpointsV2Generator;
 import software.amazon.smithy.typescript.codegen.integration.ProtocolGenerator;
 import software.amazon.smithy.typescript.codegen.integration.RuntimeClientPlugin;
 import software.amazon.smithy.typescript.codegen.integration.TypeScriptIntegration;
 import software.amazon.smithy.typescript.codegen.validation.LongValidator;
+import software.amazon.smithy.typescript.codegen.validation.ReplaceLast;
 import software.amazon.smithy.utils.MapUtils;
 import software.amazon.smithy.utils.SmithyUnstableApi;
 import software.amazon.smithy.waiters.WaitableTrait;
@@ -70,7 +72,6 @@ final class DirectedTypeScriptCodegen
      * A mapping of static resource files to copy over to a new filename.
      */
     private static final Map<String, String> STATIC_FILE_COPIES = MapUtils.of(
-            "typedoc.json", "typedoc.json",
             "tsconfig.json", "tsconfig.json",
             "tsconfig.cjs.json", "tsconfig.cjs.json",
             "tsconfig.es.json", "tsconfig.es.json",
@@ -92,9 +93,18 @@ final class DirectedTypeScriptCodegen
         directive.integrations().forEach(integration -> {
             LOGGER.info(() -> "Adding TypeScriptIntegration: " + integration.getClass().getName());
             integration.getClientPlugins().forEach(runtimePlugin -> {
-                LOGGER.info(() -> "Adding TypeScript runtime plugin: " + runtimePlugin);
-                runtimePlugins.add(runtimePlugin);
+                if (runtimePlugin.matchesSettings(directive.model(), directive.service(), directive.settings())) {
+                    LOGGER.info(() -> "Adding TypeScript runtime plugin: " + runtimePlugin);
+                    runtimePlugins.add(runtimePlugin);
+                } else {
+                    LOGGER.info(() -> "Skipping TypeScript runtime plugin based on settings: " + runtimePlugin);
+                }
             });
+        });
+
+        directive.integrations().forEach(integration -> {
+            LOGGER.info(() -> "Mutating plugins from TypeScriptIntegration: " + integration.name());
+            integration.mutateClientPlugins(runtimePlugins);
         });
 
         ProtocolGenerator protocolGenerator = resolveProtocolGenerator(
@@ -126,7 +136,9 @@ final class DirectedTypeScriptCodegen
             TypeScriptSettings settings
     ) {
         // Collect all of the supported protocol generators.
-        Map<ShapeId, ProtocolGenerator> generators = new HashMap<>();
+        // Preserve insertion order as default priority order.
+        Map<ShapeId, ProtocolGenerator> generators = new LinkedHashMap<>();
+
         for (TypeScriptIntegration integration : integrations) {
             for (ProtocolGenerator generator : integration.getProtocolGenerators()) {
                 generators.put(generator.getProtocol(), generator);
@@ -231,10 +243,20 @@ final class DirectedTypeScriptCodegen
         delegator.useShapeWriter(service, writer -> new ServiceBareBonesClientGenerator(
                 settings, model, symbolProvider, writer, integrations, runtimePlugins, applicationProtocol).run());
 
+        if (!directive.settings().useLegacyAuth()) {
+            new HttpAuthSchemeProviderGenerator(
+                delegator,
+                settings,
+                model,
+                symbolProvider,
+                directive.context().integrations()
+            ).run();
+        }
+
         // Generate the aggregated service client.
         Symbol serviceSymbol = symbolProvider.toSymbol(service);
-        String aggregatedClientName = serviceSymbol.getName().replace("Client", "");
-        String filename = serviceSymbol.getDefinitionFile().replace("Client", "");
+        String aggregatedClientName = ReplaceLast.in(serviceSymbol.getName(), "Client", "");
+        String filename = ReplaceLast.in(serviceSymbol.getDefinitionFile(), "Client", "");
         delegator.useFileWriter(filename, writer -> new ServiceAggregatedClientGenerator(
                 settings, model, symbolProvider, aggregatedClientName, writer, applicationProtocol).run());
 
@@ -283,18 +305,24 @@ final class DirectedTypeScriptCodegen
         ProtocolGenerator protocolGenerator = directive.context().protocolGenerator();
         ApplicationProtocol applicationProtocol = directive.context().applicationProtocol();
 
+        // Write operation index files
+        if (settings.generateClient()) {
+            CommandGenerator.writeIndex(model, service, symbolProvider, fileManifest);
+        }
+        if (settings.generateServerSdk()) {
+            ServerCommandGenerator.writeIndex(model, service, symbolProvider, fileManifest);
+        }
+
         // Generate each operation for the service.
         for (OperationShape operation : directive.operations()) {
             // Right now this only generates stubs
             if (settings.generateClient()) {
-                CommandGenerator.writeIndex(model, service, symbolProvider, fileManifest);
                 delegator.useShapeWriter(operation, commandWriter -> new CommandGenerator(
                         settings, model, operation, symbolProvider, commandWriter,
                         runtimePlugins, protocolGenerator, applicationProtocol).run());
             }
 
             if (settings.generateServerSdk()) {
-                ServerCommandGenerator.writeIndex(model, service, symbolProvider, fileManifest);
                 delegator.useShapeWriter(operation, commandWriter -> new ServerCommandGenerator(
                         settings, model, operation, symbolProvider, commandWriter,
                         protocolGenerator, applicationProtocol).run());
@@ -414,11 +442,28 @@ final class DirectedTypeScriptCodegen
                     directive.model(),
                     directive.symbolProvider(),
                     directive.context().writerDelegator(),
-                    directive.context().integrations());
+                    directive.context().integrations(),
+                    directive.context().applicationProtocol());
             for (LanguageTarget target : LanguageTarget.values()) {
                 LOGGER.fine("Generating " + target + " runtime configuration");
                 configGenerator.generate(target);
             }
+            new ExtensionConfigurationGenerator(
+                directive.model(),
+                directive.settings(),
+                directive.service(),
+                directive.symbolProvider(),
+                directive.context().writerDelegator(),
+                directive.context().integrations()
+            ).generate();
+            new RuntimeExtensionsGenerator(
+                directive.model(),
+                directive.settings(),
+                directive.service(),
+                directive.symbolProvider(),
+                directive.context().writerDelegator(),
+                directive.context().integrations()
+            ).generate();
         }
 
         // Generate index for client.

@@ -1,16 +1,6 @@
 /*
- * Copyright 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License").
- * You may not use this file except in compliance with the License.
- * A copy of the License is located at
- *
- *  http://aws.amazon.com/apache2.0
- *
- * or in the "license" file accompanying this file. This file is distributed
- * on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language governing
- * permissions and limitations under the License.
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package software.amazon.smithy.typescript.codegen.integration;
@@ -18,11 +8,9 @@ package software.amazon.smithy.typescript.codegen.integration;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import software.amazon.smithy.codegen.core.Symbol;
-import software.amazon.smithy.codegen.core.SymbolDependency;
 import software.amazon.smithy.model.Model;
 import software.amazon.smithy.model.knowledge.ServiceIndex;
 import software.amazon.smithy.model.knowledge.TopDownIndex;
@@ -41,11 +29,21 @@ import software.amazon.smithy.utils.SmithyInternalApi;
 
 /**
  * Add config and middleware to support a service with the @httpApiKeyAuth trait.
+ *
+ * This is legacy auth behavior, and is no longer in development.
  */
 @SmithyInternalApi
 public final class AddHttpApiKeyAuthPlugin implements TypeScriptIntegration {
 
     public static final String INTEGRATION_NAME = "HttpApiKeyAuth";
+
+    /**
+     * Integration should be used only if the `useLegacyAuth` flag is true.
+     */
+    @Override
+    public boolean matchesSettings(TypeScriptSettings settings) {
+        return settings.useLegacyAuth();
+    }
 
     /**
      * Plug into code generation for the client.
@@ -93,10 +91,7 @@ public final class AddHttpApiKeyAuthPlugin implements TypeScriptIntegration {
                             s.expectTrait(HttpApiKeyAuthTrait.class).getScheme().ifPresent(scheme ->
                                     put("scheme", scheme));
                     }})
-                    .operationPredicate((m, s, o) -> ServiceIndex.of(m).getEffectiveAuthSchemes(s, o)
-                            .keySet()
-                            .contains(HttpApiKeyAuthTrait.ID)
-                            && !o.hasTrait(OptionalAuthTrait.class))
+                    .operationPredicate((m, s, o) -> hasEffectiveHttpApiKeyAuthTrait(m, s, o))
                     .build()
         );
     }
@@ -140,21 +135,6 @@ public final class AddHttpApiKeyAuthPlugin implements TypeScriptIntegration {
                         writer.write("$L$L", noTouchNoticePrefix, "http-api-key-auth.ts");
                         writer.write("$L", source);
                 });
-
-        // Write the middleware tests.
-        writerFactory.accept(
-                Paths.get(CodegenUtils.SOURCE_FOLDER, "middleware", INTEGRATION_NAME, "index.spec.ts").toString(),
-                writer -> {
-                        writer.addDependency(SymbolDependency.builder()
-                                .dependencyType("devDependencies")
-                                .packageName("@types/jest")
-                                .version("latest")
-                                .build());
-
-                        String source = IoUtils.readUtf8Resource(getClass(), "http-api-key-auth.spec.ts");
-                        writer.write("$L$L", noTouchNoticePrefix, "http-api-key-auth.spec.ts");
-                        writer.write("$L", source);
-                });
     }
 
     private void writeAdditionalExports(
@@ -169,28 +149,33 @@ public final class AddHttpApiKeyAuthPlugin implements TypeScriptIntegration {
         }
     }
 
-    // The service has the effective trait if it's in the "effective auth schemes" response
-    // AND if not all of the operations have the optional auth trait.
-    private static boolean hasEffectiveHttpApiKeyAuthTrait(Model model, ServiceShape service) {
-        return ServiceIndex.of(model).getEffectiveAuthSchemes(service)
-                .keySet()
-                .contains(HttpApiKeyAuthTrait.ID)
-                && !areAllOptionalAuthOperations(model, service);
-    }
-
-
-    // This is derived from https://github.com/aws/aws-sdk-js-v3/blob/main/codegen/smithy-aws-typescript-codegen/src/main/java/software/amazon/smithy/aws/typescript/codegen/AddAwsAuthPlugin.java.
-    private static boolean areAllOptionalAuthOperations(Model model, ServiceShape service) {
+    // If no operations use it, then the service doesn't use it
+    private static boolean hasEffectiveHttpApiKeyAuthTrait(
+        Model model,
+        ServiceShape service
+    ) {
+        ServiceIndex serviceIndex = ServiceIndex.of(model);
         TopDownIndex topDownIndex = TopDownIndex.of(model);
-        Set<OperationShape> operations = topDownIndex.getContainedOperations(service);
-        ServiceIndex index = ServiceIndex.of(model);
-
-        for (OperationShape operation : operations) {
-            if (index.getEffectiveAuthSchemes(service, operation).isEmpty()
-                    || !operation.hasTrait(OptionalAuthTrait.class)) {
-                return false;
+        for (OperationShape operation : topDownIndex.getContainedOperations(service)) {
+            if (operation.hasTrait(OptionalAuthTrait.ID)) {
+                continue;
+            }
+            if (serviceIndex.getEffectiveAuthSchemes(service, operation).containsKey(HttpApiKeyAuthTrait.ID)) {
+                return true;
             }
         }
-        return true;
+        return false;
+    }
+
+    private static boolean hasEffectiveHttpApiKeyAuthTrait(
+        Model model,
+        ServiceShape service,
+        OperationShape operation
+    ) {
+        if (operation.hasTrait(OptionalAuthTrait.class)) {
+            return false;
+        }
+        return ServiceIndex.of(model)
+            .getEffectiveAuthSchemes(service, operation).containsKey(HttpApiKeyAuthTrait.ID);
     }
 }

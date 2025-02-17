@@ -23,12 +23,15 @@ import static software.amazon.smithy.typescript.codegen.CodegenUtils.writeClient
 import static software.amazon.smithy.typescript.codegen.CodegenUtils.writeClientCommandStreamingOutputType;
 
 import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import software.amazon.smithy.build.FileManifest;
 import software.amazon.smithy.codegen.core.Symbol;
@@ -42,16 +45,22 @@ import software.amazon.smithy.model.shapes.ServiceShape;
 import software.amazon.smithy.model.shapes.Shape;
 import software.amazon.smithy.model.shapes.ShapeId;
 import software.amazon.smithy.model.shapes.StructureShape;
+import software.amazon.smithy.model.traits.DeprecatedTrait;
 import software.amazon.smithy.model.traits.DocumentationTrait;
 import software.amazon.smithy.model.traits.ErrorTrait;
+import software.amazon.smithy.model.traits.InternalTrait;
 import software.amazon.smithy.rulesengine.traits.EndpointRuleSetTrait;
 import software.amazon.smithy.typescript.codegen.documentation.StructureExampleGenerator;
-import software.amazon.smithy.typescript.codegen.endpointsV2.EndpointsParamNameMap;
 import software.amazon.smithy.typescript.codegen.endpointsV2.RuleSetParameterFinder;
 import software.amazon.smithy.typescript.codegen.integration.ProtocolGenerator;
 import software.amazon.smithy.typescript.codegen.integration.RuntimeClientPlugin;
+import software.amazon.smithy.typescript.codegen.sections.CommandBodyExtraCodeSection;
+import software.amazon.smithy.typescript.codegen.sections.CommandConstructorCodeSection;
+import software.amazon.smithy.typescript.codegen.sections.CommandPropertiesCodeSection;
+import software.amazon.smithy.typescript.codegen.sections.PreCommandClassCodeSection;
+import software.amazon.smithy.typescript.codegen.sections.SmithyContextCodeSection;
+import software.amazon.smithy.typescript.codegen.util.CommandWriterConsumer;
 import software.amazon.smithy.typescript.codegen.validation.SensitiveDataFinder;
-import software.amazon.smithy.utils.OptionalUtils;
 import software.amazon.smithy.utils.SmithyInternalApi;
 
 /**
@@ -61,9 +70,6 @@ import software.amazon.smithy.utils.SmithyInternalApi;
 final class CommandGenerator implements Runnable {
 
     static final String COMMANDS_FOLDER = "commands";
-    static final String COMMAND_PROPERTIES_SECTION = "command_properties";
-    static final String COMMAND_BODY_EXTRA_SECTION = "command_body_extra";
-    static final String COMMAND_CONSTRUCTOR_SECTION = "command_constructor";
 
     private final TypeScriptSettings settings;
     private final Model model;
@@ -123,10 +129,6 @@ final class CommandGenerator implements Runnable {
         writer.addRelativeImport("ServiceInputTypes", null, Paths.get(".", serviceSymbol.getNamespace()));
         writer.addRelativeImport("ServiceOutputTypes", null, Paths.get(".", serviceSymbol.getNamespace()));
         writer.addImport("Command", "$Command", TypeScriptDependency.AWS_SMITHY_CLIENT);
-        writer.addImport("FinalizeHandlerArguments", "FinalizeHandlerArguments", TypeScriptDependency.SMITHY_TYPES);
-        writer.addImport("Handler", "Handler", TypeScriptDependency.SMITHY_TYPES);
-        writer.addImport("HandlerExecutionContext", "HandlerExecutionContext", TypeScriptDependency.SMITHY_TYPES);
-        writer.addImport("MiddlewareStack", "MiddlewareStack", TypeScriptDependency.SMITHY_TYPES);
 
         String name = symbol.getName();
 
@@ -137,34 +139,109 @@ final class CommandGenerator implements Runnable {
                 .append("\n")
                 .append(getThrownExceptions());
 
-        writer.writeShapeDocs(
+        boolean operationHasDocumentation = operation.hasTrait(DocumentationTrait.class);
+
+        if (operationHasDocumentation) {
+            writer.writeShapeDocs(
                 operation,
-                shapeDoc -> shapeDoc + additionalDocs);
+                shapeDoc -> shapeDoc + additionalDocs
+            );
+        } else {
+            boolean isPublic = !operation.hasTrait(InternalTrait.class);
+            boolean isDeprecated = operation.hasTrait(DeprecatedTrait.class);
 
+            writer.writeDocs(
+                (isPublic ? "@public\n" : "@internal\n")
+                + (isDeprecated ? "@deprecated\n" : "")
+                + additionalDocs
+            );
+        }
+
+        // Section of items like TypeScript @ts-ignore
+        writer.injectSection(PreCommandClassCodeSection.builder()
+            .settings(settings)
+            .model(model)
+            .service(service)
+            .operation(operation)
+            .symbolProvider(symbolProvider)
+            .runtimeClientPlugins(runtimePlugins)
+            .protocolGenerator(protocolGenerator)
+            .applicationProtocol(applicationProtocol)
+            .build());
         writer.openBlock(
-                "export class $L extends $$Command<$T, $T, $L> {", "}",
-                name, inputType, outputType,
-                configType, () -> {
+            "export class $L extends $$Command.classBuilder<$T, $T, $L, ServiceInputTypes, ServiceOutputTypes>()",
+            ".build() {", // class open bracket.
+            name, inputType, outputType, configType,
+            () -> {
+                generateEndpointParameterInstructionProvider();
+                generateCommandMiddlewareResolver(configType);
+                writeSerde();
+            });
+        // Ctor section.
+        writer.injectSection(CommandConstructorCodeSection.builder()
+            .settings(settings)
+            .model(model)
+            .service(service)
+            .operation(operation)
+            .symbolProvider(symbolProvider)
+            .runtimeClientPlugins(runtimePlugins)
+            .protocolGenerator(protocolGenerator)
+            .applicationProtocol(applicationProtocol)
+            .build());
+        // Section for adding custom command properties.
+        writer.injectSection(CommandPropertiesCodeSection.builder()
+            .settings(settings)
+            .model(model)
+            .service(service)
+            .operation(operation)
+            .symbolProvider(symbolProvider)
+            .runtimeClientPlugins(runtimePlugins)
+            .protocolGenerator(protocolGenerator)
+            .applicationProtocol(applicationProtocol)
+            .build());
+        // Hook for adding more methods to the command.
+        writer.injectSection(CommandBodyExtraCodeSection.builder()
+            .settings(settings)
+            .model(model)
+            .service(service)
+            .operation(operation)
+            .symbolProvider(symbolProvider)
+            .runtimeClientPlugins(runtimePlugins)
+            .protocolGenerator(protocolGenerator)
+            .applicationProtocol(applicationProtocol)
+            .build());
 
-                    // Section for adding custom command properties.
-                    writer.write("// Start section: $L", COMMAND_PROPERTIES_SECTION);
-                    writer.pushState(COMMAND_PROPERTIES_SECTION).popState();
-                    writer.write("// End section: $L", COMMAND_PROPERTIES_SECTION);
-                    writer.write("");
-                    generateEndpointParameterInstructionProvider();
-                    writer.write("");
+        {
+            // This block places the most commonly sought type definitions
+            // closer to the command definition, for navigation assistance
+            // in IDEs.
+            Shape operationInputShape = model.expectShape(operation.getInputShape());
+            Symbol baseInput = symbolProvider.toSymbol(operationInputShape);
+            Shape operationOutputShape = model.expectShape(operation.getOutputShape());
+            Symbol baseOutput = symbolProvider.toSymbol(operationOutputShape);
 
-                    generateCommandConstructor();
-                    writer.write("");
-                    generateCommandMiddlewareResolver(configType);
-                    writeSerde();
+            writer.write("/** @internal type navigation helper, not in runtime. */");
+            writer.openBlock("declare protected static __types: {", "};", () -> {
+                String baseInputStr = operationInputShape.getAllMembers().isEmpty()
+                    ? "{}"
+                    : baseInput.getName();
+                String baseOutputStr = operationOutputShape.getAllMembers().isEmpty()
+                    ? "{}"
+                    : baseOutput.getName();
+                writer.write("""
+                api: {
+                    input: $L;
+                    output: $L;
+                };""", baseInputStr, baseOutputStr);
+                writer.write("""
+                sdk: {
+                    input: $T;
+                    output: $T;
+                };""", inputType, outputType);
+            });
+        }
 
-                    // Hook for adding more methods to the command.
-                    writer.write("// Start section: $L", COMMAND_BODY_EXTRA_SECTION)
-                            .pushState(COMMAND_BODY_EXTRA_SECTION)
-                            .popState()
-                            .write("// End section: $L", COMMAND_BODY_EXTRA_SECTION);
-                });
+        writer.write("}"); // class close bracket.
     }
 
     private String getCommandExample(String serviceName, String configName, String commandName, String commandInput,
@@ -180,12 +257,12 @@ final class CommandGenerator implements Runnable {
                 + String.format("const client = new %s(config);%n", serviceName)
                 + String.format("const input = %s%n",
                         StructureExampleGenerator.generateStructuralHintDocumentation(
-                                model.getShape(operation.getInputShape()).get(), model, false))
+                                model.getShape(operation.getInputShape()).get(), model, false, true))
                 + String.format("const command = new %s(input);%n", commandName)
                 + "const response = await client.send(command);\n"
                 + String.format("%s%n",
                         StructureExampleGenerator.generateStructuralHintDocumentation(
-                                model.getShape(operation.getOutputShape()).get(), model, true))
+                                model.getShape(operation.getOutputShape()).get(), model, true, false))
                 + "\n```\n"
                 + "\n"
                 + String.format("@param %s - {@link %s}%n", commandInput, commandInput)
@@ -220,157 +297,158 @@ final class CommandGenerator implements Runnable {
         return buffer.toString();
     }
 
-    private void generateCommandConstructor() {
-        writer.writeDocs("@public")
-                .openBlock("constructor(readonly input: $T) {", "}", inputType, () -> {
-                    // The constructor can be intercepted and changed.
-                    writer.write("// Start section: $L", COMMAND_CONSTRUCTOR_SECTION)
-                            .pushState(COMMAND_CONSTRUCTOR_SECTION)
-                            .write("super();")
-                            .popState()
-                            .write("// End section: $L", COMMAND_CONSTRUCTOR_SECTION);
-                });
-    }
-
     private void generateEndpointParameterInstructionProvider() {
         if (!service.hasTrait(EndpointRuleSetTrait.class)) {
             return;
         }
-        writer.addImport("EndpointParameterInstructions", null, TypeScriptDependency.MIDDLEWARE_ENDPOINTS_V2);
-        writer.openBlock(
-                "public static getEndpointParameterInstructions(): EndpointParameterInstructions {", "}",
-                () -> {
-                    writer.openBlock(
-                            "return {", "};",
-                            () -> {
-                                RuleSetParameterFinder parameterFinder = new RuleSetParameterFinder(service);
-                                Set<String> paramNames = new HashSet<>();
 
-                                parameterFinder.getStaticContextParamValues(operation).forEach((name, value) -> {
-                                    paramNames.add(name);
-                                    writer.write(
-                                            "$L: { type: \"staticContextParams\", value: $L },",
-                                            name, value);
-                                });
+        writer.addImport(
+            "commonParams", null,
+            Paths.get(".", CodegenUtils.SOURCE_FOLDER, "endpoint/EndpointParameters").toString()
+        );
 
-                                Shape operationInput = model.getShape(operation.getInputShape()).get();
-                                parameterFinder.getContextParams(operationInput).forEach((name, type) -> {
-                                    if (!paramNames.contains(name)) {
-                                        writer.write(
-                                            "$L: { type: \"contextParams\", name: \"$L\" },",
-                                            name, name);
-                                    }
-                                    paramNames.add(name);
-                                });
+        RuleSetParameterFinder parameterFinder = new RuleSetParameterFinder(service);
+        Map<String, String> staticContextParamValues = parameterFinder.getStaticContextParamValues(operation);
+        Map<String, String> contextParams = parameterFinder.getContextParams(
+            model.getShape(operation.getInputShape()).get()
+        );
+        Map<String, String> operationContextParamValues = parameterFinder.getOperationContextParamValues(operation);
 
-                                parameterFinder.getClientContextParams().forEach((name, type) -> {
-                                    if (!paramNames.contains(name)) {
-                                        writer.write(
-                                                "$L: { type: \"clientContextParams\", name: \"$L\" },",
-                                                name, EndpointsParamNameMap.getLocalName(name));
-                                    }
-                                    paramNames.add(name);
-                                });
+        if (staticContextParamValues.isEmpty() && contextParams.isEmpty() && operationContextParamValues.isEmpty()) {
+            writer.write(".ep(commonParams)");
+            return;
+        }
 
-                                parameterFinder.getBuiltInParams().forEach((name, type) -> {
-                                    if (!paramNames.contains(name)) {
-                                        writer.write(
-                                                "$L: { type: \"builtInParams\", name: \"$L\" },",
-                                                name, EndpointsParamNameMap.getLocalName(name));
-                                    }
-                                    paramNames.add(name);
-                                });
-                            });
-                });
+        writer.write(".ep({")
+            .indent();
+        {
+            writer.write("...commonParams,");
+            Set<String> paramNames = new HashSet<>();
+
+            staticContextParamValues.forEach((name, value) -> {
+                paramNames.add(name);
+                writer.write(
+                    "$L: { type: \"staticContextParams\", value: $L },",
+                    name, value);
+            });
+
+            contextParams.forEach((name, memberName) -> {
+                if (!paramNames.contains(name)) {
+                    writer.write(
+                        "$L: { type: \"contextParams\", name: \"$L\" },",
+                        name, memberName);
+                }
+                paramNames.add(name);
+            });
+
+            operationContextParamValues.forEach((name, jmesPathForInputInJs) -> {
+                writer.write(
+                    """
+                    $L: { type: \"operationContextParams\", get: (input?: any) => $L },
+                    """,
+                    name, jmesPathForInputInJs);
+            });
+        }
+        writer.write("})")
+            .dedent();
     }
 
     private void generateCommandMiddlewareResolver(String configType) {
         Symbol serde = TypeScriptDependency.MIDDLEWARE_SERDE.createSymbol("getSerdePlugin");
-        writer.writeDocs("@internal");
-        writer.write("resolveMiddleware(")
-                .indent()
-                .write("clientStack: MiddlewareStack<$L, $L>,", "ServiceInputTypes", "ServiceOutputTypes")
-                .write("configuration: $L,", configType)
-                .write("options?: $T", applicationProtocol.getOptionsType())
-                .dedent();
-        writer.openBlock("): Handler<$T, $T> {", "}", inputType, outputType, () -> {
-            // Add serialization and deserialization plugin.
-            writer.write("this.middlewareStack.use($T(configuration, this.serialize, this.deserialize));", serde);
 
+        Function<StructureShape, String> getFilterFunctionName = input -> {
+            if (sensitiveDataFinder.findsSensitiveDataIn(input)) {
+                Symbol inputSymbol = symbolProvider.toSymbol(input);
+                String filterFunctionName = inputSymbol.getName() + "FilterSensitiveLog";
+                writer.addRelativeImport(
+                    filterFunctionName,
+                    null,
+                    Paths.get(".", inputSymbol.getNamespace()));
+                return filterFunctionName;
+            }
+            return "void 0";
+        };
+        String inputFilterFn = operationIndex
+            .getInput(operation)
+            .map(getFilterFunctionName)
+            .orElse("void 0");
+
+        String outputFilterFn = operationIndex
+            .getOutput(operation)
+            .map(getFilterFunctionName)
+            .orElse("void 0");
+
+        writer.pushState()
+            .putContext("client", symbolProvider.toSymbol(service).getName())
+            .putContext("command", symbolProvider.toSymbol(operation).getName())
+            .putContext("service", service.toShapeId().getName())
+            .putContext("operation", operation.toShapeId().getName())
+            .putContext("inputFilter", inputFilterFn)
+            .putContext("outputFilter", outputFilterFn)
+            .putContext("configType", configType)
+            .putContext("optionsType", applicationProtocol.getOptionsType())
+            .putContext("inputType", inputType)
+            .putContext("outputType", outputType);
+
+        writer.write(
+            """
+                .m(function (this: any, Command: any, cs: any, config: $configType:L, o: any) {
+                    return [
+            """
+        );
+        {
+            // Add serialization and deserialization plugin.
+            writer.write("$T(config, this.serialize, this.deserialize),", serde);
             // EndpointsV2
             if (service.hasTrait(EndpointRuleSetTrait.class)) {
                 writer.addImport(
-                        "getEndpointPlugin",
-                        null,
-                        TypeScriptDependency.MIDDLEWARE_ENDPOINTS_V2);
-                writer.openBlock(
-                        "this.middlewareStack.use(getEndpointPlugin(configuration, ",
-                        "));",
-                        () -> {
-                            writer.write("$L.getEndpointParameterInstructions()", symbol.getName());
-                        });
+                    "getEndpointPlugin",
+                    null,
+                    TypeScriptDependency.MIDDLEWARE_ENDPOINTS_V2);
+                writer.write(
+                    """
+                    getEndpointPlugin(config, Command.getEndpointParameterInstructions()),"""
+                );
             }
-
             // Add customizations.
             addCommandSpecificPlugins();
+        }
+        writer.write(
+            """
+                ];
+            })"""
+        ); // end middleware.
 
-            // Resolve the middleware stack.
-            writer.write("\nconst stack = clientStack.concat(this.middlewareStack);\n");
-            writer.write("const { logger } = configuration;");
-            writer.write("const clientName = $S;", symbolProvider.toSymbol(service).getName());
-            writer.write("const commandName = $S;", symbolProvider.toSymbol(operation).getName());
-            writer.openBlock("const handlerExecutionContext: HandlerExecutionContext = {", "}", () -> {
-                writer.write("logger,");
-                writer.write("clientName,");
-                writer.write("commandName,");
-                writer.openBlock("inputFilterSensitiveLog: ", ",", () -> {
-                    OptionalUtils.ifPresentOrElse(operationIndex.getInput(operation),
-                            input -> {
-                                if (sensitiveDataFinder.findsSensitiveDataIn(input)) {
-                                    Symbol inputSymbol = symbolProvider.toSymbol(input);
-                                    String filterFunctionName = inputSymbol.getName() + "FilterSensitiveLog";
-                                    writer.addRelativeImport(
-                                            filterFunctionName,
-                                            null,
-                                            Paths.get(".", inputSymbol.getNamespace()));
-                                    writer.writeInline(filterFunctionName);
-                                } else {
-                                    writer.writeInline("(_: any) => _");
-                                }
-                            },
-                            () -> writer.writeInline("(_: any) => _"));
-                });
-                writer.openBlock("outputFilterSensitiveLog: ", ",", () -> {
-                    OptionalUtils.ifPresentOrElse(operationIndex.getOutput(operation),
-                            output -> {
-                                if (sensitiveDataFinder.findsSensitiveDataIn(output)) {
-                                    Symbol outputSymbol = symbolProvider.toSymbol(output);
-                                    String filterFunctionName = outputSymbol.getName() + "FilterSensitiveLog";
-                                    writer.addRelativeImport(
-                                            filterFunctionName,
-                                            null,
-                                            Paths.get(".", outputSymbol.getNamespace()));
-                                    writer.writeInline(filterFunctionName);
-                                } else {
-                                    writer.writeInline("(_: any) => _");
-                                }
-                            },
-                            () -> writer.writeInline("(_: any) => _"));
-                });
-            });
-            writer.write("const { requestHandler } = configuration;");
-            writer.openBlock("return stack.resolve(", ");", () -> {
-                writer.write("(request: FinalizeHandlerArguments<any>) => ");
-                writer.write("  requestHandler.handle(request.request as $T, options || {}),",
-                        applicationProtocol.getRequestType());
-                writer.write("handlerExecutionContext");
-            });
-        });
+        // context, filters
+        writer.openBlock(
+            """
+            .s($service:S, $operation:S, {
+            """,
+            """
+            })
+            .n($client:S, $command:S)
+            .f($inputFilter:L, $outputFilter:L)""",
+            () -> {
+                writer.pushState(SmithyContextCodeSection.builder()
+                    .settings(settings)
+                    .model(model)
+                    .service(service)
+                    .operation(operation)
+                    .symbolProvider(symbolProvider)
+                    .runtimeClientPlugins(runtimePlugins)
+                    .protocolGenerator(protocolGenerator)
+                    .applicationProtocol(applicationProtocol)
+                    .build());
+                writer.popState();
+            }
+        );
+        writer.popState();
     }
 
     private void addInputAndOutputTypes() {
         writer.writeDocs("@public");
-        writer.write("export { __MetadataBearer, $$Command };");
+        writer.write("export type { __MetadataBearer };");
+        writer.write("export { $$Command };");
 
         writeInputType(inputType.getName(), operationIndex.getInput(operation), symbol.getName());
         writeOutputType(outputType.getName(), operationIndex.getOutput(operation), symbol.getName());
@@ -440,50 +518,63 @@ final class CommandGenerator implements Runnable {
         // applied automatically when the Command's middleware stack is copied from
         // the service's middleware stack.
         for (RuntimeClientPlugin plugin : runtimePlugins) {
-            plugin.getPluginFunction().ifPresent(symbol -> {
+            plugin.getPluginFunction().ifPresent(pluginSymbol -> {
+                // Construct additional parameters string
                 Map<String, Object> paramsMap = plugin.getAdditionalPluginFunctionParameters(
                         model, service, operation);
-                List<String> additionalParameters = CodegenUtils.getFunctionParametersList(paramsMap);
 
-                String additionalParamsString = additionalParameters.isEmpty()
-                        ? ""
-                        : ", { " + String.join(", ", additionalParameters) + "}";
-                writer.write("this.middlewareStack.use($T(configuration$L));",
-                        symbol, additionalParamsString);
+
+                // Construct writer context
+                Map<String, Object> symbolMap = new HashMap<>();
+                symbolMap.put("pluginFn", pluginSymbol);
+                for (Map.Entry<String, Object> entry : paramsMap.entrySet()) {
+                    if (entry.getValue() instanceof Symbol) {
+                        symbolMap.put(entry.getKey(), entry.getValue());
+                    }
+                }
+                writer.pushState();
+                writer.putContext(symbolMap);
+                writer.openBlock("$pluginFn:T(config", "),", () -> {
+                    List<String> additionalParameters = CodegenUtils.getFunctionParametersList(paramsMap);
+                    Map<String, CommandWriterConsumer> clientAddParamsWriterConsumers =
+                        plugin.getOperationAddParamsWriterConsumers();
+                    if (additionalParameters.isEmpty() && clientAddParamsWriterConsumers.isEmpty()) {
+                        return;
+                    }
+                    writer.openBlock(", { ", " }", () -> {
+                        // caution: using String.join instead of templating
+                        // because additionalParameters may contain Smithy syntax.
+                        if (!additionalParameters.isEmpty()) {
+                            writer.writeInline(String.join(", ", additionalParameters) + ", ");
+                        }
+                        clientAddParamsWriterConsumers.forEach((key, consumer) -> {
+                            writer.writeInline("$L: $C,", key, (Consumer<TypeScriptWriter>) (w -> {
+                                consumer.accept(w, CommandConstructorCodeSection.builder()
+                                    .settings(settings)
+                                    .model(model)
+                                    .service(service)
+                                    .symbolProvider(symbolProvider)
+                                    .runtimeClientPlugins(runtimePlugins)
+                                    .applicationProtocol(applicationProtocol)
+                                    .build());
+                            }));
+                        });
+                    });
+                });
+                writer.popState();
             });
         }
     }
 
     private void writeSerde() {
-        writer.write("")
-                .writeDocs("@internal")
-                .write("private serialize(")
-                .indent()
-                .write("input: $T,", inputType)
-                .write("context: $L", CodegenUtils.getOperationSerializerContextType(writer, model, operation))
-                .dedent()
-                .openBlock(
-                        "): Promise<$T> {", "}",
-                        applicationProtocol.getRequestType(),
-                        () -> writeSerdeDispatcher(true));
-
-        writer.write("")
-                .writeDocs("@internal")
-                .write("private deserialize(")
-                .indent()
-                .write("output: $T,", applicationProtocol.getResponseType())
-                .write("context: $L",
-                        CodegenUtils.getOperationDeserializerContextType(settings, writer, model, operation))
-                .dedent()
-                .openBlock("): Promise<$T> {", "}", outputType, () -> writeSerdeDispatcher(false))
-                .write("");
+        writer
+            .write(".ser($L)", getSerdeDispatcher(true))
+            .write(".de($L)", getSerdeDispatcher(false));
     }
 
-    private void writeSerdeDispatcher(boolean isInput) {
-        // For example:
-        // return getFooCommandAws_RestJson1_1Serialize(input, utils);
+    private String getSerdeDispatcher(boolean isInput) {
         if (protocolGenerator == null) {
-            writer.write("throw new Error(\"No supported protocol was found\");");
+            return "() => { throw new Error(\"No supported protocol was found\"); }";
         } else {
             String serdeFunctionName = isInput
                     ? ProtocolGenerator.getSerFunctionShortName(symbol)
@@ -491,7 +582,7 @@ final class CommandGenerator implements Runnable {
             writer.addRelativeImport(serdeFunctionName, null,
                     Paths.get(".", CodegenUtils.SOURCE_FOLDER, ProtocolGenerator.PROTOCOLS_FOLDER,
                             ProtocolGenerator.getSanitizedName(protocolGenerator.getName())));
-            writer.write("return $L($L, context);", serdeFunctionName, isInput ? "input" : "output");
+            return serdeFunctionName;
         }
     }
 
@@ -504,8 +595,12 @@ final class CommandGenerator implements Runnable {
 
         TopDownIndex topDownIndex = TopDownIndex.of(model);
         Set<OperationShape> containedOperations = new TreeSet<>(topDownIndex.getContainedOperations(service));
-        for (OperationShape operation : containedOperations) {
-            writer.write("export * from \"./$L\";", symbolProvider.toSymbol(operation).getName());
+        if (containedOperations.isEmpty()) {
+            writer.write("export {};");
+        } else {
+            for (OperationShape operation : containedOperations) {
+                writer.write("export * from \"./$L\";", symbolProvider.toSymbol(operation).getName());
+            }
         }
 
         fileManifest.writeFile(

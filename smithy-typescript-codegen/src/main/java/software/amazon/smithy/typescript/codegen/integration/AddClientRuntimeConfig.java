@@ -5,15 +5,21 @@
 
 package software.amazon.smithy.typescript.codegen.integration;
 
+import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import software.amazon.smithy.codegen.core.SymbolProvider;
 import software.amazon.smithy.model.Model;
+import software.amazon.smithy.typescript.codegen.CodegenUtils;
 import software.amazon.smithy.typescript.codegen.LanguageTarget;
 import software.amazon.smithy.typescript.codegen.TypeScriptDependency;
 import software.amazon.smithy.typescript.codegen.TypeScriptSettings;
 import software.amazon.smithy.typescript.codegen.TypeScriptWriter;
+import software.amazon.smithy.typescript.codegen.extensions.DefaultExtensionConfigurationInterface;
+import software.amazon.smithy.typescript.codegen.extensions.ExtensionConfigurationInterface;
+import software.amazon.smithy.typescript.codegen.extensions.HttpHandlerExtensionConfigurationInterface;
 import software.amazon.smithy.utils.MapUtils;
 import software.amazon.smithy.utils.SmithyInternalApi;
 
@@ -62,10 +68,17 @@ public final class AddClientRuntimeConfig implements TypeScriptIntegration {
 
         writer.writeDocs("Value for how many times a request will be made at most in case of retry.")
                 .write("maxAttempts?: number | __Provider<number>;\n");
-        writer.writeDocs("Specifies which retry algorithm to use.")
+        writer.writeDocs("""
+                         Specifies which retry algorithm to use.
+                         @see https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/Package/-smithy-util-retry/Enum/RETRY_MODES/
+                         """)
                 .write("retryMode?: string | __Provider<string>;\n");
         writer.writeDocs("Optional logger for logging debug/info/warn/error.")
                 .write("logger?: __Logger;\n");
+        writer.addRelativeImport("RuntimeExtension", null,
+                Paths.get(".", CodegenUtils.SOURCE_FOLDER, "runtimeExtensions"));
+        writer.writeDocs("Optional extensions")
+                .write("extensions?: RuntimeExtension[];\n");
     }
 
     @Override
@@ -105,7 +118,7 @@ public final class AddClientRuntimeConfig implements TypeScriptIntegration {
                                     TypeScriptDependency.NODE_CONFIG_PROVIDER);
                             writer.addImport("NODE_MAX_ATTEMPT_CONFIG_OPTIONS", null,
                                     TypeScriptDependency.MIDDLEWARE_RETRY);
-                            writer.write("loadNodeConfig(NODE_MAX_ATTEMPT_CONFIG_OPTIONS)");
+                            writer.write("loadNodeConfig(NODE_MAX_ATTEMPT_CONFIG_OPTIONS, config)");
                         },
                         "retryMode", writer -> {
                             writer.addDependency(TypeScriptDependency.NODE_CONFIG_PROVIDER);
@@ -115,7 +128,7 @@ public final class AddClientRuntimeConfig implements TypeScriptIntegration {
                             writer.addImport("NODE_RETRY_MODE_CONFIG_OPTIONS", null,
                                     TypeScriptDependency.MIDDLEWARE_RETRY);
                             writer.addImport("DEFAULT_RETRY_MODE", null, TypeScriptDependency.UTIL_RETRY);
-                            writer.openBlock("loadNodeConfig({", "})", () -> {
+                            writer.openBlock("loadNodeConfig({", "}, config)", () -> {
                                 writer.write("...NODE_RETRY_MODE_CONFIG_OPTIONS,");
                                 writer.write("default: async () => "
                                              + "(await defaultConfigProvider()).retryMode || DEFAULT_RETRY_MODE,");
@@ -125,5 +138,13 @@ public final class AddClientRuntimeConfig implements TypeScriptIntegration {
         default:
                 return Collections.emptyMap();
         }
+    }
+
+    @Override
+    public List<ExtensionConfigurationInterface> getExtensionConfigurationInterfaces(
+        Model model,
+        TypeScriptSettings settings
+    ) {
+        return List.of(new DefaultExtensionConfigurationInterface(), new HttpHandlerExtensionConfigurationInterface());
     }
 }
