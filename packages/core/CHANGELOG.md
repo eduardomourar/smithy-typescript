@@ -1,5 +1,11 @@
 # Change Log
 
+## 3.23.2
+
+### Patch Changes
+
+- c5db01c: fix for Unit event stream union targets
+
 ## 3.23.1
 
 ### Patch Changes
