@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.0.1
+
+### Patch Changes
+
+- b1c9f6c: fix snapshotting of AWS event stream inputs
+
 ## 1.0.0
 
 ### Major Changes
