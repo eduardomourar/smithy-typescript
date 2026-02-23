@@ -1,5 +1,15 @@
 # Change Log
 
+## 4.2.12
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/node-http-handler@4.4.11
+  - @smithy/types@4.12.1
+  - @smithy/util-buffer-from@4.2.1
+
 ## 4.2.11
 
 ### Patch Changes

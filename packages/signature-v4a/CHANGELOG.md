@@ -1,5 +1,16 @@
 # @smithy/signature-v4a
 
+## 3.1.9
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/signature-v4@5.3.9
+  - @smithy/types@4.12.1
+  - @smithy/util-hex-encoding@4.2.1
+  - @smithy/util-utf8@4.2.1
+
 ## 3.1.8
 
 ### Patch Changes

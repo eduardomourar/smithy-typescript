@@ -1,5 +1,20 @@
 # Change Log
 
+## 4.4.35
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/node-config-provider@4.3.9
+  - @smithy/protocol-http@5.3.9
+  - @smithy/service-error-classification@4.2.9
+  - @smithy/smithy-client@4.11.7
+  - @smithy/types@4.12.1
+  - @smithy/util-middleware@4.2.9
+  - @smithy/util-retry@4.2.9
+  - @smithy/uuid@1.1.1
+
 ## 4.4.34
 
 ### Patch Changes

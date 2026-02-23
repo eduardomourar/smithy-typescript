@@ -1,5 +1,21 @@
 # Change Log
 
+## 3.23.4
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/middleware-serde@4.2.10
+  - @smithy/protocol-http@5.3.9
+  - @smithy/types@4.12.1
+  - @smithy/util-base64@4.3.1
+  - @smithy/util-body-length-browser@4.2.1
+  - @smithy/util-middleware@4.2.9
+  - @smithy/util-stream@4.5.14
+  - @smithy/util-utf8@4.2.1
+  - @smithy/uuid@1.1.1
+
 ## 3.23.3
 
 ### Patch Changes

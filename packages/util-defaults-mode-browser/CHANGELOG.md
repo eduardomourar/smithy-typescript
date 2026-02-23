@@ -1,5 +1,15 @@
 # Change Log
 
+## 4.3.34
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/property-provider@4.2.9
+  - @smithy/smithy-client@4.11.7
+  - @smithy/types@4.12.1
+
 ## 4.3.33
 
 ### Patch Changes

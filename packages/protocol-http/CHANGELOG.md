@@ -1,5 +1,13 @@
 # Change Log
 
+## 5.3.9
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/types@4.12.1
+
 ## 5.3.8
 
 ### Patch Changes

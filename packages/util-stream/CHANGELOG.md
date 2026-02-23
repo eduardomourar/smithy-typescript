@@ -1,5 +1,19 @@
 # Change Log
 
+## 4.5.14
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/fetch-http-handler@5.3.10
+  - @smithy/node-http-handler@4.4.11
+  - @smithy/types@4.12.1
+  - @smithy/util-base64@4.3.1
+  - @smithy/util-buffer-from@4.2.1
+  - @smithy/util-hex-encoding@4.2.1
+  - @smithy/util-utf8@4.2.1
+
 ## 4.5.13
 
 ### Patch Changes

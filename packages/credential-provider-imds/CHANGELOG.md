@@ -1,5 +1,16 @@
 # Change Log
 
+## 4.2.9
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/node-config-provider@4.3.9
+  - @smithy/property-provider@4.2.9
+  - @smithy/types@4.12.1
+  - @smithy/url-parser@4.2.9
+
 ## 4.2.8
 
 ### Patch Changes

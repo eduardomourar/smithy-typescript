@@ -1,5 +1,18 @@
 # Change Log
 
+## 4.11.7
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/core@3.23.4
+  - @smithy/middleware-endpoint@4.4.18
+  - @smithy/middleware-stack@4.2.9
+  - @smithy/protocol-http@5.3.9
+  - @smithy/types@4.12.1
+  - @smithy/util-stream@4.5.14
+
 ## 4.11.6
 
 ### Patch Changes

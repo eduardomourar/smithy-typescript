@@ -1,5 +1,19 @@
 # Change Log
 
+## 4.4.18
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/core@3.23.4
+  - @smithy/middleware-serde@4.2.10
+  - @smithy/node-config-provider@4.3.9
+  - @smithy/shared-ini-file-loader@4.4.4
+  - @smithy/types@4.12.1
+  - @smithy/url-parser@4.2.9
+  - @smithy/util-middleware@4.2.9
+
 ## 4.4.17
 
 ### Patch Changes

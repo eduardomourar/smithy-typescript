@@ -1,5 +1,18 @@
 # Change Log
 
+## 4.2.37
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/config-resolver@4.4.7
+  - @smithy/credential-provider-imds@4.2.9
+  - @smithy/node-config-provider@4.3.9
+  - @smithy/property-provider@4.2.9
+  - @smithy/smithy-client@4.11.7
+  - @smithy/types@4.12.1
+
 ## 4.2.36
 
 ### Patch Changes

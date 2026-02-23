@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.1.1
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+
 ## 1.1.0
 
 ### Minor Changes

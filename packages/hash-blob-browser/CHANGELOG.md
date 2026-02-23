@@ -1,5 +1,15 @@
 # Change Log
 
+## 4.2.10
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/chunked-blob-reader@5.2.1
+  - @smithy/chunked-blob-reader-native@4.2.2
+  - @smithy/types@4.12.1
+
 ## 4.2.9
 
 ### Patch Changes

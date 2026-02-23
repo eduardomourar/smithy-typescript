@@ -1,5 +1,15 @@
 # Change Log
 
+## 4.3.9
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/property-provider@4.2.9
+  - @smithy/shared-ini-file-loader@4.4.4
+  - @smithy/types@4.12.1
+
 ## 4.3.8
 
 ### Patch Changes

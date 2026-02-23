@@ -1,5 +1,15 @@
 # Change Log
 
+## 1.0.12
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/core@3.23.4
+  - @smithy/types@4.12.1
+  - @smithy/util-middleware@4.2.9
+
 ## 1.0.11
 
 ### Patch Changes

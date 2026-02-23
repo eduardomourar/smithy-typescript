@@ -1,5 +1,14 @@
 # Change Log
 
+## 4.3.1
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/util-buffer-from@4.2.1
+  - @smithy/util-utf8@4.2.1
+
 ## 4.3.0
 
 ### Minor Changes

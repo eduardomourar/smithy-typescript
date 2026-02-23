@@ -1,5 +1,13 @@
 # Change Log
 
+## 4.2.2
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/util-base64@4.3.1
+
 ## 4.2.1
 
 ### Patch Changes

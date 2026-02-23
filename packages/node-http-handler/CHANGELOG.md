@@ -1,5 +1,16 @@
 # Change Log
 
+## 4.4.11
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/abort-controller@4.2.9
+  - @smithy/protocol-http@5.3.9
+  - @smithy/querystring-builder@4.2.9
+  - @smithy/types@4.12.1
+
 ## 4.4.10
 
 ### Patch Changes

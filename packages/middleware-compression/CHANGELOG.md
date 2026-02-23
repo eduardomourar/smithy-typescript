@@ -1,5 +1,20 @@
 # Change Log
 
+## 4.3.33
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/core@3.23.4
+  - @smithy/is-array-buffer@4.2.1
+  - @smithy/node-config-provider@4.3.9
+  - @smithy/protocol-http@5.3.9
+  - @smithy/types@4.12.1
+  - @smithy/util-config-provider@4.2.1
+  - @smithy/util-middleware@4.2.9
+  - @smithy/util-utf8@4.2.1
+
 ## 4.3.32
 
 ### Patch Changes

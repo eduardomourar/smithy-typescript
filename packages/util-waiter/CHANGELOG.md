@@ -1,5 +1,14 @@
 # Change Log
 
+## 4.2.9
+
+### Patch Changes
+
+- 03c3dc8: update for rollup build externalLiveBindings=false
+- Updated dependencies [03c3dc8]
+  - @smithy/abort-controller@4.2.9
+  - @smithy/types@4.12.1
+
 ## 4.2.8
 
 ### Patch Changes
