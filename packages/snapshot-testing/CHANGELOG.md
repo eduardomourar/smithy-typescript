@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.0.4
+
+### Patch Changes
+
+- 832fa25: omit exec env from user agent
+
 ## 1.0.3
 
 ### Patch Changes
