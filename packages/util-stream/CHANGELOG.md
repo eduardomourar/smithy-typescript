@@ -1,5 +1,11 @@
 # Change Log
 
+## 4.5.13
+
+### Patch Changes
+
+- ffe1843: Handle backpressure in ChecksumStream by deferring write callbacks when downstream buffer is full, resuming when \_read is called.
+
 ## 4.5.12
 
 ### Patch Changes
