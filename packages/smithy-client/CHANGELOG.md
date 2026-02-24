@@ -1,5 +1,21 @@
 # Change Log
 
+## 4.12.0
+
+### Minor Changes
+
+- d0954cc: allow adding new checksum algorithms via extension
+
+### Patch Changes
+
+- Updated dependencies [d0954cc]
+  - @smithy/types@4.13.0
+  - @smithy/core@3.23.6
+  - @smithy/middleware-endpoint@4.4.20
+  - @smithy/middleware-stack@4.2.10
+  - @smithy/protocol-http@5.3.10
+  - @smithy/util-stream@4.5.15
+
 ## 4.11.8
 
 ### Patch Changes

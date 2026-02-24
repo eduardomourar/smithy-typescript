@@ -1,5 +1,16 @@
 # Change Log
 
+## 1.0.6
+
+### Patch Changes
+
+- abfdfb6: in snapshot-testing, normalize date string timezone
+- Updated dependencies [d0954cc]
+  - @smithy/types@4.13.0
+  - @smithy/core@3.23.6
+  - @smithy/eventstream-codec@4.2.10
+  - @smithy/protocol-http@5.3.10
+
 ## 1.0.5
 
 ### Patch Changes

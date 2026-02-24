@@ -1,5 +1,11 @@
 # Change Log
 
+## 4.13.0
+
+### Minor Changes
+
+- d0954cc: allow adding new checksum algorithms via extension
+
 ## 4.12.1
 
 ### Patch Changes

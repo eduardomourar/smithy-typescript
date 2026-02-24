@@ -1,5 +1,13 @@
 # Change Log
 
+## 3.2.11
+
+### Patch Changes
+
+- Updated dependencies [d0954cc]
+  - @smithy/types@4.13.0
+  - @smithy/fetch-http-handler@5.3.11
+
 ## 3.2.10
 
 ### Patch Changes

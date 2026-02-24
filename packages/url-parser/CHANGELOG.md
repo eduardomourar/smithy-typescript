@@ -1,5 +1,13 @@
 # Change Log
 
+## 4.2.10
+
+### Patch Changes
+
+- Updated dependencies [d0954cc]
+  - @smithy/types@4.13.0
+  - @smithy/querystring-parser@4.2.10
+
 ## 4.2.9
 
 ### Patch Changes
