@@ -1,5 +1,11 @@
 # Change Log
 
+## 3.3.0
+
+### Minor Changes
+
+- 2bf677c: return empty when given non-ASCII input in substring
+
 ## 3.2.9
 
 ### Patch Changes

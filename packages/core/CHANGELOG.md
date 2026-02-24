@@ -1,5 +1,12 @@
 # Change Log
 
+## 3.23.5
+
+### Patch Changes
+
+- 026b177: fix(protocols): remove unsafe type cast in resolvedPath to handle null/undefined from labelValueProvider
+- cde9f09: fix extraneous serialization of idempotencyToken into http body
+
 ## 3.23.4
 
 ### Patch Changes
