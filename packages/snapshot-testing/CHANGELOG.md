@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.0.7
+
+### Patch Changes
+
+- c8f3a9f: additional member value overrides for snapshot data generator
+
 ## 1.0.6
 
 ### Patch Changes
