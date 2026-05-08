@@ -1,5 +1,26 @@
 # Change Log
 
+## 3.24.0
+
+### Minor Changes
+
+- 540aeb4: consolidate core/retry and related cleanup
+- 4f30af1: consolidation for core/protocols
+- 8963b91: consolidate packages into core/serde
+- 9194e9f: consolidate into core/endpoints
+- 7ec62a0: fix browser bundler metadata for @smithy/core
+- 62fed78: package consolidation for core/config
+- cad44fc: consolidate core/event-streams
+- f21bf6b: consolidate packages into core/client
+
+### Patch Changes
+
+- ee92b6b: move core/serde checksum components to core/checksum
+- 0be0b36: clean up exported API surface
+- fb323fb: avoid sideEffects in core submodule indices
+- 545589a: Avoid throwing from waiter 403 warning checks when no responses have been observed.
+- 7fd6ac0: export surface equality for core, Node.js/browser/react-native
+
 ## 3.23.17
 
 ### Patch Changes

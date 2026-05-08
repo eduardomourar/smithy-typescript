@@ -1,5 +1,35 @@
 # Change Log
 
+## 2.1.0
+
+### Minor Changes
+
+- 4f30af1: consolidation for core/protocols
+- 8963b91: consolidate packages into core/serde
+- cad44fc: consolidate core/event-streams
+
+### Patch Changes
+
+- Updated dependencies [ee92b6b]
+- Updated dependencies [540aeb4]
+- Updated dependencies [da4e89e]
+- Updated dependencies [5329323]
+- Updated dependencies [0be0b36]
+- Updated dependencies [4f30af1]
+- Updated dependencies [8963b91]
+- Updated dependencies [fb323fb]
+- Updated dependencies [9194e9f]
+- Updated dependencies [09093fb]
+- Updated dependencies [7ec62a0]
+- Updated dependencies [75603d4]
+- Updated dependencies [62fed78]
+- Updated dependencies [cad44fc]
+- Updated dependencies [545589a]
+- Updated dependencies [f21bf6b]
+- Updated dependencies [7fd6ac0]
+  - @smithy/core@3.24.0
+  - @smithy/node-http-handler@4.7.0
+
 ## 2.0.8
 
 ### Patch Changes
