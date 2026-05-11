@@ -1,5 +1,12 @@
 # Change Log
 
+## 3.24.1
+
+### Patch Changes
+
+- 2dc5cf6: fix for uuid generation in Node.js 18.x
+- 1d0ff86: retrieve schemas with matching shape name if unambiguous
+
 ## 3.24.0
 
 ### Minor Changes
