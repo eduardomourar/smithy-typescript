@@ -1,5 +1,12 @@
 # @smithy/eventstream-serde-node
 
+## 4.3.2
+
+### Patch Changes
+
+- Updated dependencies [6d4eb8a]
+  - @smithy/core@3.24.2
+
 ## 4.3.1
 
 ### Patch Changes

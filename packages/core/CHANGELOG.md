@@ -1,5 +1,11 @@
 # Change Log
 
+## 3.24.2
+
+### Patch Changes
+
+- 6d4eb8a: fix for browser utf8 variant not to include Buffer (Node.js)
+
 ## 3.24.1
 
 ### Patch Changes
