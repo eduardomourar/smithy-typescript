@@ -1,5 +1,13 @@
 # @smithy/smithy-client
 
+## 4.13.3
+
+### Patch Changes
+
+- Updated dependencies [cf00244]
+  - @smithy/types@4.14.2
+  - @smithy/core@3.24.3
+
 ## 4.13.2
 
 ### Patch Changes

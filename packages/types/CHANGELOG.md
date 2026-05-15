@@ -1,5 +1,11 @@
 # Change Log
 
+## 4.14.2
+
+### Patch Changes
+
+- cf00244: fix(types): exclude SharedArrayBuffer from recursive type transform
+
 ## 4.14.1
 
 ### Patch Changes

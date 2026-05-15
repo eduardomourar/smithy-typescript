@@ -1,5 +1,12 @@
 # Change Log
 
+## 3.24.3
+
+### Patch Changes
+
+- Updated dependencies [cf00244]
+  - @smithy/types@4.14.2
+
 ## 3.24.2
 
 ### Patch Changes

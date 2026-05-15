@@ -1,5 +1,11 @@
 # @smithy/util-utf8
 
+## 4.3.3
+
+### Patch Changes
+
+- @smithy/core@3.24.3
+
 ## 4.3.2
 
 ### Patch Changes

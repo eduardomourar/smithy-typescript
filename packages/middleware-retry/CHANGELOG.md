@@ -1,5 +1,11 @@
 # @smithy/middleware-retry
 
+## 4.6.3
+
+### Patch Changes
+
+- @smithy/core@3.24.3
+
 ## 4.6.2
 
 ### Patch Changes

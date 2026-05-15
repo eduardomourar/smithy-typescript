@@ -1,6 +1,6 @@
 {
   "name": "@smithy/abort-controller",
-  "version": "4.2.14",
+  "version": "4.2.15",
   "description": "A simple abort controller library",
   "main": "./dist-cjs/index.js",
   "module": "./dist-es/index.js",

@@ -1,5 +1,11 @@
 # @smithy/shared-ini-file-loader
 
+## 4.5.3
+
+### Patch Changes
+
+- @smithy/core@3.24.3
+
 ## 4.5.2
 
 ### Patch Changes

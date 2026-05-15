@@ -1,5 +1,11 @@
 # @smithy/util-endpoints
 
+## 3.5.3
+
+### Patch Changes
+
+- @smithy/core@3.24.3
+
 ## 3.5.2
 
 ### Patch Changes
