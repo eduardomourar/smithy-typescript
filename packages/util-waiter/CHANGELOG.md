@@ -1,5 +1,12 @@
 # @smithy/util-waiter
 
+## 4.5.14
+
+### Patch Changes
+
+- Updated dependencies [155bb56]
+  - @smithy/core@3.30.0
+
 ## 4.5.13
 
 ### Patch Changes

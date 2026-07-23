@@ -1,5 +1,11 @@
 # Change Log
 
+## 3.30.0
+
+### Minor Changes
+
+- 155bb56: updating errors list for clock skew errors (retryable)
+
 ## 3.29.8
 
 ### Patch Changes
