@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+### Minor Changes
+
+- 761267d: update ServerProtocol interfaces
+- e3172c6: chore to bring @smithy/server-\* packages into repo standards
+
 ## 0.1.6
 
 ### Patch Changes
